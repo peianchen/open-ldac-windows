@@ -8,7 +8,7 @@
 typedef struct {
     unsigned owner, opening, opened, callbacks, callback_seen, retired;
     unsigned io, calls, close_wanted, closing, attempts;
-    unsigned close_succeeded, close_failed, fault, disposing;
+    unsigned close_succeeded, close_failed, fault, disposing, disconnected;
 } ol_lifetime;
 typedef enum { OL_LEASE_CALL, OL_LEASE_IO, OL_LEASE_CALLBACK } ol_lease;
 void ol_life_init(ol_lifetime *life);
@@ -18,6 +18,7 @@ int ol_life_open_begin(ol_lifetime *life);
 int ol_life_open_end(ol_lifetime *life, int succeeded);
 void ol_life_detach(ol_lifetime *life);
 void ol_life_close_wanted(ol_lifetime *life);
+void ol_life_remote_disconnect(ol_lifetime *life);
 int ol_life_close_begin(ol_lifetime *life);
 int ol_life_close_not_sent(ol_lifetime *life);
 int ol_life_close_end(ol_lifetime *life, int succeeded);

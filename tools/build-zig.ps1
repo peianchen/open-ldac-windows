@@ -26,6 +26,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Lifecycle test compilation failed' }
     & .\build\lifetime_tests.exe
     if ($LASTEXITCODE -ne 0) { throw 'Lifecycle tests failed' }
+    & $compiler 'cc' '-target' 'x86_64-windows-gnu' '-mcpu=baseline' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-DOL_NATIVE_HOST_TEST=1' '-Iinclude' '-Idriver/transport' '-Itests/native' 'tests/native/native_adapter_tests.c' 'driver/transport/client.c' 'driver/transport/connection.c' 'driver/transport/control.c' 'driver/transport/queue.c' 'src/lifetime.c' '-o' 'build/native_adapter_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Native adapter host compilation failed' }
+    & .\build\native_adapter_tests.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Native adapter host tests failed' }
     & .\build\core_tests.exe
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 } finally {

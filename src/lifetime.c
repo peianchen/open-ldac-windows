@@ -53,9 +53,13 @@ int ol_life_open_end(ol_lifetime *life, int succeeded) {
 }
 void ol_life_detach(ol_lifetime *life) { life->owner = 0; life->close_wanted = 1; }
 void ol_life_close_wanted(ol_lifetime *life) { life->close_wanted = 1; }
+void ol_life_remote_disconnect(ol_lifetime *life) {
+    life->close_wanted = 1;
+    life->disconnected = 1; /* CloseNow asks the provider to close, NOT retire callbacks. */
+}
 int ol_life_close_begin(ol_lifetime *life) {
     if (!life->close_wanted || !life->opened || life->opening || life->closing ||
-        life->retired || life->close_succeeded || life->close_failed ||
+        life->retired || life->disconnected || life->close_succeeded || life->close_failed ||
         life->attempts >= OL_CLOSE_ATTEMPTS || life->disposing || life->fault) return 0;
     life->closing = 1;
     ++life->attempts;

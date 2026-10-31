@@ -21,7 +21,8 @@ or LDAC playback. No kernel driver has been installed or loaded on the laptop.
   queue stop cancels sent I/O. Runtime sleep/removal correctness is unverified.
 - Pointer-free status ABI v2 reports counters/MTUs and live/retained connection
   roots without MAC addresses. File handles and uncertain roots each have a cap
-  of two per device, so repeated failures cannot grow the root list unboundedly.
+  of two per device, so repeated failures cannot grow the root list unboundedly. Read-only diagnostics additionally expose 14 event
+  counters for later kernel evidence collection, without kernel pointers or MACs.
 
 The WDF waiting queue/request allocation is not a fixed streaming buffer pool.
 M1 is diagnostic transport; allocation, batching, backpressure and power transitions
@@ -48,6 +49,7 @@ Build `wldac_probe` through root CMake or `tools/build-zig.ps1`:
 ```powershell
 ./build/wldac_probe.exe --list
 ./build/wldac_probe.exe --status
+./build/wldac_probe.exe --diagnostics
 # Only after separately reviewed driver installation:
 ./build/wldac_probe.exe --discover
 ```
@@ -76,9 +78,16 @@ failure alone never impersonates provider callback retirement. If retirement is
 not observed, the root remains bounded and visible instead of being freed by a
 timer. Further connects can return busy until it is released.
 
+Remote disconnect uses the documented CloseNow response, with no duplicate CLOSE
+from file cleanup. Surprise removal marks the device removed and stops its local
+I/O target once, without waiting or sending BRBs; post-Send checks cancel requests
+queued in that race. The host shim now exercises the actual transport function
+bodies, but cannot prove real WDF scheduling, IRQL or BthPort behavior.
+
 The callback contract with a non-null WDM `ReferenceObject`, device removal,
 Verifier fault injection and a valid signing/rollback strategy are still **load
-gates**, not established by host tests. See [lifecycle design](../docs/LIFETIME.md).
+gates**, not established by host tests. No isolated Windows test setup is available yet.
+See [lifecycle design](../docs/LIFETIME.md) and [kernel matrix](../docs/KERNEL_TEST_MATRIX.md).
 
 ## Licensing
 

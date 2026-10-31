@@ -48,7 +48,12 @@ cancellation check. Checking before and after Send covers cleanup occurring whil
 the request is not yet sent. Cancel's return value never drops an I/O lease or
 frees a BRB/OVERLAPPED buffer. Completion removes its slot exactly once. Remote
 disconnect marks closing before the cancellation snapshot so new I/O cannot slip
-between those operations. Queue stop marks cancellation and asks the target to
+between those operations. Remote disconnect responds with CloseNow TRUE and
+marks a distinct disconnected state so later file cleanup does not submit duplicate
+CLOSE. Hardware removal atomically marks the device removed and stops its local
+I/O target without waiting. Pre/post-Send removal checks cancel work queued during
+the race; the stopped target prevents delivery to the lower driver. The PnP surprise
+removal callback also marks/stops it once, without sending BRBs. Queue stop marks cancellation and asks the target to
 cancel; completion remains responsible for retiring the request.
 
 OPEN uses only the bound XM6 Audio Sink address and assigned AVDTP PSM 0x0019.
@@ -62,7 +67,16 @@ late release and I/O completion, cancelled/failed open, inline completion, missi
 provider retirement, I/O capacity and invalid bookkeeping. They exhaust 1,020
 enabled event schedules across four close outcomes. A small host cancellation
 model also checks the two-check ordering; it is not the WDF adapter itself.
-ASan/UBSan CI applies only to this host target, separately from the encoder.
+A second host target compiles the actual client/connection/control/queue function
+bodies against a modeled WDF boundary. It covers allocation/reuse/format/Send
+failures, live file destruction, retained-root and eight-I/O caps, inline/late
+completion, cancel-before-Send, remote CloseNow and target-stop races. The shim
+models API contracts, not IRQL, real concurrency or Bluetooth behavior. ASan/UBSan
+CI applies to both host targets, separately from the encoder.
+
+The current development system has no isolated kernel test environment. The
+[required kernel matrix](KERNEL_TEST_MATRIX.md) remains NOT RUN. The read-only
+collector cannot turn host or metadata evidence into a kernel acceptance result.
 
 Before a laptop trial, a separate kernel test environment must establish:
 
@@ -85,3 +99,6 @@ Primary contracts:
 - [OPEN channel](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_l2ca_open_channel): ReferenceObject is an object-manager reference, not a WDF context handle. WDK headers require it when requesting a callback; it remains non-null here.
 - [Cancel sent request](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestcancelsentrequest): cancellation races require request references and actual completion.
 - [WDF object lifecycle](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/framework-object-life-cycle): cleanup/deletion and final reference release differ.
+
+- [CloseNow](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_indication_parameters): remote disconnect can ask the provider to close without another CLOSE BRB.
+- [Target stop](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfiotarget/nf-wdfiotarget-wdfiotargetstop): stopped targets can accept queued requests, so post-Send cancellation remains necessary.

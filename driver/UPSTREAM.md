@@ -27,3 +27,10 @@ No background service, timer-resolution change, kernel codec math or Windows PCM
 endpoint is included. Host fault models/static INF checks are not evidence of
 kernel cancellation, suspend, playback or battery safety. Provider retirement and
 kernel fault tests remain installation gates; see `docs/LIFETIME.md`.
+
+Callback follow-up: RemoteDisconnect uses CloseNow instead of submitting a second
+CLOSE, including hardware removal. A once-only removal marker stops the local I/O
+target with LeaveSentIoPending; pre/post-Send removal checks cancel queued races.
+Read-only diagnostics expose event counters for future kernel evidence. Host tests
+compile actual adapter bodies against a test-only WDF boundary; the kernel build
+rejects the host-test macro. No actual provider/Verifier acceptance is claimed.

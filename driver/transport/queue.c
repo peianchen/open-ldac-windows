@@ -23,6 +23,7 @@ static VOID Transfer(WDFREQUEST Request, size_t Length, ULONG Direction)
     WDFMEMORY memory;
     OL_REQUEST_CONTEXT *context;
     PBTHECHO_CONNECTION c;
+    PBTHECHOSAMPLE_CLIENT_CONTEXT dev;
     struct _BRB_L2CA_ACL_TRANSFER *brb;
     /* Keeps request context valid across inline completion and post-send cancel. */
     WdfObjectReference(Request);
@@ -30,6 +31,7 @@ static VOID Transfer(WDFREQUEST Request, size_t Length, ULONG Direction)
     if (!NT_SUCCESS(status)) goto failed;
     context = GetOlRequestContext(Request);
     c = context->Connection;
+    dev = GetClientDeviceContext(c->DevCtxHdr->Device);
     status = Direction == ACL_TRANSFER_DIRECTION_OUT
         ? WdfRequestRetrieveInputMemory(Request, &memory)
         : WdfRequestRetrieveOutputMemory(Request, &memory);
@@ -41,13 +43,17 @@ static VOID Transfer(WDFREQUEST Request, size_t Length, ULONG Direction)
     if (InterlockedCompareExchange(&context->CancelWanted, 0, 0) || WdfRequestIsCanceled(Request)) {
         status = STATUS_CANCELLED; goto failed;
     }
+    if (InterlockedCompareExchange(&dev->Removed, 0, 0)) {
+        status = STATUS_DEVICE_NOT_CONNECTED; goto failed;
+    }
     WdfRequestSetCompletionRoutine(Request, BthEchoCliReadWriteCompletion, brb);
     if (!WdfRequestSend(Request, c->DevCtxHdr->IoTarget, NULL)) {
         status = WdfRequestGetStatus(Request); goto failed;
     }
     /* Cleanup can race the check above while the request was not sent yet. */
-    if (InterlockedCompareExchange(&context->CancelWanted, 0, 0))
-        (void)WdfRequestCancelSentRequest(Request);
+    if (InterlockedCompareExchange(&context->CancelWanted, 0, 0) ||
+        InterlockedCompareExchange(&dev->Removed, 0, 0))
+        OlCancelRequest(dev, Request);
     WdfObjectDereference(Request);
     return;
 failed:
@@ -71,10 +77,10 @@ VOID BthEchoCliEvtQueueIoRead(WDFQUEUE Queue, WDFREQUEST Request, size_t Length)
 _Use_decl_annotations_
 VOID BthEchoCliEvtQueueIoStop(WDFQUEUE Queue, WDFREQUEST Request, ULONG ActionFlags)
 {
-    UNREFERENCED_PARAMETER(Queue); UNREFERENCED_PARAMETER(ActionFlags);
+    UNREFERENCED_PARAMETER(ActionFlags);
     WdfObjectReference(Request);
     InterlockedExchange(&GetOlRequestContext(Request)->CancelWanted, 1);
-    (void)WdfRequestCancelSentRequest(Request);
+    OlCancelRequest(GetClientDeviceContext(WdfIoQueueGetDevice(Queue)), Request);
     /* The actual completion, not the cancel return value, retires the I/O lease. */
     WdfObjectDereference(Request);
 }

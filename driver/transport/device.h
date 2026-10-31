@@ -41,6 +41,8 @@ typedef struct _BTHECHOSAMPLE_CLIENT_CONTEXT
     volatile LONG ActiveFiles;
     volatile LONG Connections;
     volatile LONG RetainedConnections;
+    volatile LONG Removed;
+    volatile LONG64 Events[OL_EVENT_COUNT];
     volatile LONG InFlight;
     volatile LONG64 BytesSent;
     volatile LONG64 BytesReceived; 
@@ -97,6 +99,10 @@ BthEchoCliContextInit(
 EVT_WDF_DRIVER_DEVICE_ADD BthEchoCliEvtDriverDeviceAdd;
 
 EVT_WDF_DEVICE_SELF_MANAGED_IO_INIT BthEchoCliEvtDeviceSelfManagedIoInit;
+EVT_WDF_DEVICE_SURPRISE_REMOVAL OlEvtSurpriseRemoval;
+VOID OlMarkRemoved(WDFDEVICE Device);
+VOID OlRecordEvent(PBTHECHOSAMPLE_CLIENT_CONTEXT Device, enum ol_diag_event Event);
+VOID OlCancelRequest(PBTHECHOSAMPLE_CLIENT_CONTEXT Device, WDFREQUEST Request);
 
 EVT_WDF_DEVICE_FILE_CREATE BthEchoCliEvtDeviceFileCreate;
 

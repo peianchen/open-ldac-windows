@@ -91,6 +91,7 @@ Return Value:
     //
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
     pnpPowerCallbacks.EvtDeviceSelfManagedIoInit = BthEchoCliEvtDeviceSelfManagedIoInit;
+    pnpPowerCallbacks.EvtDeviceSurpriseRemoval = OlEvtSurpriseRemoval;
 
     WdfDeviceInitSetPnpPowerEventCallbacks(
        DeviceInit,

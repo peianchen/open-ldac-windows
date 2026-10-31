@@ -6,6 +6,39 @@
 
 C_ASSERT(sizeof(ol_native_request) == 8);
 C_ASSERT(sizeof(ol_native_status) == 64);
+C_ASSERT(sizeof(ol_native_diagnostics) == 128);
+
+VOID OlRecordEvent(PBTHECHOSAMPLE_CLIENT_CONTEXT Device, enum ol_diag_event Event)
+{
+    NT_ASSERT(Event < OL_EVENT_COUNT);
+    InterlockedIncrement64(&Device->Events[Event]);
+}
+
+VOID OlCancelRequest(PBTHECHOSAMPLE_CLIENT_CONTEXT Device, WDFREQUEST Request)
+{
+    OlRecordEvent(Device, OL_EVENT_CANCEL_CALL);
+    (void)WdfRequestCancelSentRequest(Request);
+}
+
+VOID OlMarkRemoved(WDFDEVICE Device)
+{
+    PBTHECHOSAMPLE_CLIENT_CONTEXT dev = GetClientDeviceContext(Device);
+    /* Exactly one caller stops the local target. LeaveSentIoPending never waits
+     * in a Bluetooth callback; framework removal retires already sent I/O.
+     * A concurrent Send can queue, but cannot be delivered after target stop. */
+    if (!InterlockedCompareExchange(&dev->Removed, 1, 0)) {
+        OlRecordEvent(dev, OL_EVENT_REMOVAL);
+        if (dev->Header.IoTarget != NULL)
+            WdfIoTargetStop(dev->Header.IoTarget, WdfIoTargetLeaveSentIoPending);
+    }
+}
+
+_Use_decl_annotations_
+VOID OlEvtSurpriseRemoval(WDFDEVICE Device)
+{
+    /* Framework forwards removal; never submit CLOSE from this notification. */
+    OlMarkRemoved(Device);
+}
 
 VOID BthEchoCliEvtDeviceFileCreate(WDFDEVICE Device, WDFREQUEST Request,
                                  WDFFILEOBJECT FileObject)
@@ -62,6 +95,24 @@ VOID OlEvtDeviceIoControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLengt
         return;
     }
     file = GetFileContext(object);
+    if (IoControlCode == OL_IOCTL_DIAGNOSTICS) {
+        ol_native_diagnostics *diagnostics;
+        ULONG event;
+        if (OutputLength < sizeof(*diagnostics)) {
+            WdfRequestComplete(Request, STATUS_BUFFER_TOO_SMALL); return;
+        }
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*diagnostics), (PVOID *)&diagnostics, NULL);
+        if (!NT_SUCCESS(status)) { WdfRequestComplete(Request, status); return; }
+        RtlZeroMemory(diagnostics, sizeof(*diagnostics));
+        diagnostics->size = sizeof(*diagnostics);
+        diagnostics->version = OL_DIAGNOSTICS_ABI;
+        diagnostics->count = OL_EVENT_COUNT;
+        if (InterlockedCompareExchange(&dev->Removed, 0, 0)) diagnostics->flags = OL_DIAG_REMOVED;
+        for (event = 0; event < OL_EVENT_COUNT; ++event)
+            diagnostics->events[event] = (ol_u64)InterlockedCompareExchange64(&dev->Events[event], 0, 0);
+        WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, sizeof(*diagnostics));
+        return;
+    }
     if (IoControlCode == OL_IOCTL_QUERY) {
         if (OutputLength < sizeof(*output)) {
             WdfRequestComplete(Request, STATUS_BUFFER_TOO_SMALL);
@@ -127,6 +178,7 @@ NTSTATUS OlBeginTransfer(WDFREQUEST Request, size_t Length, ULONG Direction)
     if (c == NULL) return STATUS_INVALID_DEVICE_STATE;
     dev = GetClientDeviceContext(c->DevCtxHdr->Device);
     WdfSpinLockAcquire(c->ConnectionLock);
+    if (InterlockedCompareExchange(&dev->Removed, 0, 0)) goto done;
     if (!ol_life_can_io(&c->Life)) goto done;
     mtu = Direction == ACL_TRANSFER_DIRECTION_OUT ? c->OutMTU : c->InMTU;
     if ((Direction == ACL_TRANSFER_DIRECTION_OUT && Length > mtu) ||
@@ -167,6 +219,7 @@ VOID OlFinishTransfer(WDFREQUEST Request, NTSTATUS Status, size_t Bytes)
         (void)ol_life_drop(&c->Life, OL_LEASE_IO);
         WdfSpinLockRelease(c->ConnectionLock);
         request->Connection = NULL;
+        OlRecordEvent(dev, OL_EVENT_TRANSFER_COMPLETE);
         if (NT_SUCCESS(Status)) {
             if (request->Direction == ACL_TRANSFER_DIRECTION_OUT)
                 InterlockedExchangeAdd64(&dev->BytesSent, (LONG64)Bytes);

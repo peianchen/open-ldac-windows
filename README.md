@@ -83,6 +83,9 @@ The design keeps the existing Windows Bluetooth radio/transport drivers and
 uses public Bluetooth profile DDIs. It does not claim that a registry key adds a
 codec to Microsoft's A2DP driver. See [native architecture](docs/NATIVE_ARCHITECTURE.md)
 and [driver build prerequisites](driver/README.md).
+Core callback/Verifier runtime acceptance is pending an isolated Windows test
+environment; see the [kernel test matrix](docs/KERNEL_TEST_MATRIX.md). Host adapter
+fault tests and passive diagnostics do not satisfy that gate.
 
 ## License and provenance
 

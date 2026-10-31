@@ -26,6 +26,13 @@ Environment:
 
 #pragma once
 
+#if defined(OL_NATIVE_HOST_TEST)
+#if defined(_KERNEL_MODE)
+#error Host test platform must never be used in a kernel build
+#endif
+#include "native_platform.h"
+#include "native_transport.h"
+#else
 #include <ntddk.h>
 #include <wdf.h>
 #include <initguid.h> 
@@ -41,6 +48,7 @@ Environment:
 
 #include "trace.h"
 #include "public.h"
+#endif
 
 #define POOLTAG_BTHECHOSAMPLE 'htbw'
 

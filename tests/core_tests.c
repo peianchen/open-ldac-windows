@@ -141,6 +141,8 @@ static int codec_tests(void) {
 int main(void) {
     CHECK(sizeof(ol_native_request) == 8);
     CHECK(sizeof(ol_native_status) == 64);
+    CHECK(sizeof(ol_native_diagnostics) == 128);
+    CHECK(offsetof(ol_native_diagnostics, events) == 16 && OL_EVENT_COUNT == 14);
     CHECK(offsetof(ol_native_status, bytes_sent) == 48);
     CHECK((OL_IOCTL_QUERY & 3) == 0 && (OL_IOCTL_CONNECT & 3) == 0);
     CHECK(OL_MAX_INFLIGHT == 8 && OL_MAX_CHANNELS == 2 && OL_MAX_PACKET == 1008);

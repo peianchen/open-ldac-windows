@@ -32,23 +32,34 @@ VOID BthEchoCliIndicationCallback(PVOID Context, INDICATION_CODE Indication,
 {
     PBTHECHO_CONNECTION c = (PBTHECHO_CONNECTION)Context;
     PDEVICE_OBJECT device = WdfDeviceWdmGetDeviceObject(c->DevCtxHdr->Device);
+    PBTHECHOSAMPLE_CLIENT_CONTEXT dev = GetClientDeviceContext(c->DevCtxHdr->Device);
     BOOLEAN releaseDevice = FALSE;
-    UNREFERENCED_PARAMETER(Parameters);
     OlConnectionEnter(c);
     if (Indication == IndicationAddReference) {
+        OlRecordEvent(dev, OL_EVENT_CALLBACK_ADD);
         WdfSpinLockAcquire(c->ConnectionLock);
         if (ol_life_take(&c->Life, OL_LEASE_CALLBACK)) ObReferenceObject(device);
+        else OlRecordEvent(dev, OL_EVENT_CONTRACT_FAULT);
         WdfSpinLockRelease(c->ConnectionLock);
     } else if (Indication == IndicationReleaseReference) {
+        OlRecordEvent(dev, OL_EVENT_CALLBACK_RELEASE);
         WdfSpinLockAcquire(c->ConnectionLock);
         releaseDevice = ol_life_drop(&c->Life, OL_LEASE_CALLBACK) ? TRUE : FALSE;
+        if (!releaseDevice) OlRecordEvent(dev, OL_EVENT_CONTRACT_FAULT);
         WdfSpinLockRelease(c->ConnectionLock);
     } else if (Indication == IndicationRemoteDisconnect) {
+        OlRecordEvent(dev, OL_EVENT_REMOTE_DISCONNECT);
+        /* Do not send CLOSE after surprise removal. CloseNow is the documented
+         * provider-owned shutdown response for every remote disconnect reason. */
+        if (Parameters != NULL) {
+            Parameters->Parameters.Disconnect.CloseNow = TRUE;
+            if (Parameters->Parameters.Disconnect.Reason == HardwareRemoval)
+                OlMarkRemoved(c->DevCtxHdr->Device);
+        }
         WdfSpinLockAcquire(c->ConnectionLock);
-        ol_life_close_wanted(&c->Life);
+        ol_life_remote_disconnect(&c->Life);
         WdfSpinLockRelease(c->ConnectionLock);
         OlConnectionCancelTransfers(c);
-        OlConnectionClose(c);
     }
     OlConnectionLeave(c);
     /* No access to c after dropping its final callback/dispatch lease. */
@@ -66,6 +77,8 @@ VOID OlOpenComplete(WDFREQUEST Request, WDFIOTARGET Target,
     int mustClose;
     UNREFERENCED_PARAMETER(Target);
     OlConnectionEnter(c); /* Opening lease protects entry even after file cleanup. */
+    OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_OPEN_COMPLETE);
+    if (!NT_SUCCESS(status)) OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_OPEN_FAILURE);
     WdfSpinLockAcquire(c->ConnectionLock);
     if (NT_SUCCESS(status)) {
         c->OutMTU = brb->OutResults.Params.Mtu;
@@ -95,6 +108,9 @@ VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request,
     struct _BRB_L2CA_OPEN_CHANNEL *brb;
     NTSTATUS status;
     int began;
+    if (InterlockedCompareExchange(&dev->Removed, 0, 0)) {
+        WdfRequestComplete(Request, STATUS_DEVICE_NOT_CONNECTED); return;
+    }
     if (WdfRequestIsCanceled(Request)) {
         WdfRequestComplete(Request, STATUS_CANCELLED); return;
     }
@@ -141,14 +157,19 @@ VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request,
     if (NT_SUCCESS(status) && (WdfRequestIsCanceled(Request) ||
         InterlockedCompareExchange(&GetOlRequestContext(Request)->CancelWanted, 0, 0)))
         status = STATUS_CANCELLED;
+    if (NT_SUCCESS(status) && InterlockedCompareExchange(&dev->Removed, 0, 0))
+        status = STATUS_DEVICE_NOT_CONNECTED;
     if (NT_SUCCESS(status)) {
         WdfRequestSetCompletionRoutine(Request, OlOpenComplete, brb);
+        OlRecordEvent(dev, OL_EVENT_OPEN_SEND);
         if (!WdfRequestSend(Request, dev->Header.IoTarget, NULL))
             status = WdfRequestGetStatus(Request);
-        else if (InterlockedCompareExchange(&GetOlRequestContext(Request)->CancelWanted, 0, 0))
-            (void)WdfRequestCancelSentRequest(Request);
+        else if (InterlockedCompareExchange(&GetOlRequestContext(Request)->CancelWanted, 0, 0) ||
+                 InterlockedCompareExchange(&dev->Removed, 0, 0))
+            OlCancelRequest(dev, Request);
     }
     if (!NT_SUCCESS(status)) {
+        OlRecordEvent(dev, OL_EVENT_OPEN_FAILURE);
         WdfSpinLockAcquire(c->ConnectionLock);
         c->OpenRequest = NULL;
         (void)ol_life_open_end(&c->Life, 0);

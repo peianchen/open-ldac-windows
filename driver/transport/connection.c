@@ -51,6 +51,7 @@ VOID OlConnectionDestroy(WDFOBJECT Object)
     wdm = WdfDeviceWdmGetDeviceObject(device);
     if (c->RetainedCounted) InterlockedDecrement(&dev->RetainedConnections);
     if (c->Counted) InterlockedDecrement(&dev->Connections);
+    if (c->Counted) OlRecordEvent(dev, OL_EVENT_ROOT_DESTROY);
     if (targetHeld) WdfObjectDereference(target);
     if (deviceHeld) WdfObjectDereference(device);
     if (wdmHeld) ObDereferenceObject(wdm);
@@ -157,7 +158,7 @@ VOID OlConnectionCancelTransfers(PBTHECHO_CONNECTION c)
     }
     WdfSpinLockRelease(c->ConnectionLock);
     for (i = 0; i < count; ++i) {
-        (void)WdfRequestCancelSentRequest(requests[i]);
+        OlCancelRequest(GetClientDeviceContext(c->DevCtxHdr->Device), requests[i]);
         WdfObjectDereference(requests[i]);
     }
 }
@@ -169,6 +170,9 @@ VOID OlCloseComplete(WDFREQUEST Request, WDFIOTARGET Target,
     PBTHECHO_CONNECTION c = (PBTHECHO_CONNECTION)Context;
     UNREFERENCED_PARAMETER(Request); UNREFERENCED_PARAMETER(Target);
     OlConnectionEnter(c); /* Close-pending lease protects this entry. */
+    OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_CLOSE_COMPLETE);
+    if (!NT_SUCCESS(Params->IoStatus.Status))
+        OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_CLOSE_FAILURE);
     WdfSpinLockAcquire(c->ConnectionLock);
     (void)ol_life_close_end(&c->Life, NT_SUCCESS(Params->IoStatus.Status));
     WdfSpinLockRelease(c->ConnectionLock);
@@ -188,7 +192,8 @@ VOID OlConnectionClose(PBTHECHO_CONNECTION c)
     for (;;) {
         int begin;
         WdfSpinLockAcquire(c->ConnectionLock);
-        begin = ol_life_close_begin(&c->Life);
+        begin = !InterlockedCompareExchange(&GetClientDeviceContext(c->DevCtxHdr->Device)->Removed, 0, 0)
+            && ol_life_close_begin(&c->Life);
         WdfSpinLockRelease(c->ConnectionLock);
         if (!begin) break;
         WDF_REQUEST_REUSE_PARAMS_INIT(&reuse, WDF_REQUEST_REUSE_NO_FLAGS, STATUS_NOT_SUPPORTED);
@@ -202,11 +207,23 @@ VOID OlConnectionClose(PBTHECHO_CONNECTION c)
                 NULL, NULL, NULL, NULL, NULL);
         }
         if (NT_SUCCESS(status)) {
+            if (InterlockedCompareExchange(&GetClientDeviceContext(c->DevCtxHdr->Device)->Removed, 0, 0)) {
+                WdfSpinLockAcquire(c->ConnectionLock);
+                (void)ol_life_close_not_sent(&c->Life);
+                WdfSpinLockRelease(c->ConnectionLock);
+                break;
+            }
             WdfRequestSetCompletionRoutine(c->CloseRequest, OlCloseComplete, c);
-            if (WdfRequestSend(c->CloseRequest, c->DevCtxHdr->IoTarget, NULL)) break;
+            OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_CLOSE_SEND);
+            if (WdfRequestSend(c->CloseRequest, c->DevCtxHdr->IoTarget, NULL)) {
+                if (InterlockedCompareExchange(&GetClientDeviceContext(c->DevCtxHdr->Device)->Removed, 0, 0))
+                    OlCancelRequest(GetClientDeviceContext(c->DevCtxHdr->Device), c->CloseRequest);
+                break;
+            }
             status = WdfRequestGetStatus(c->CloseRequest);
         }
         UNREFERENCED_PARAMETER(status);
+        OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_CLOSE_FAILURE);
         WdfSpinLockAcquire(c->ConnectionLock);
         (void)ol_life_close_not_sent(&c->Life);
         WdfSpinLockRelease(c->ConnectionLock);

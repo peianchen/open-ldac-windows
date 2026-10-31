@@ -97,8 +97,9 @@ int main(int argc, char **argv)
     int discover = argc >= 2 && !strcmp(argv[1], "--discover");
     int list = argc == 1 || (argc == 2 && !strcmp(argv[1], "--list"));
     int status = argc >= 2 && !strcmp(argv[1], "--status");
-    if ((!list && !status && !discover) || argc > 3) {
-        fprintf(stderr, "Usage: wldac_probe [--list | --status [index] | --discover [index]]\n"
+    int diagnostics = argc >= 2 && !strcmp(argv[1], "--diagnostics");
+    if ((!list && !status && !discover && !diagnostics) || argc > 3) {
+        fprintf(stderr, "Usage: wldac_probe [--list | --status [index] | --diagnostics [index] | --discover [index]]\n"
                         "List/status do not open a Bluetooth channel. Discover explicitly connects and sends AVDTP.\n");
         return 2;
     }
@@ -126,6 +127,29 @@ int main(int argc, char **argv)
     if (handle == INVALID_HANDLE_VALUE) {
         fprintf(stderr, "Cannot open transport (Windows error %lu). Admin access is required.\n", GetLastError());
         return 1;
+    }
+    if (diagnostics) {
+        ol_native_diagnostics snapshot;
+        static const char *names[OL_EVENT_COUNT] = {
+            "open_send_attempts", "open_completions", "open_failures",
+            "callback_add", "callback_release", "contract_faults", "remote_disconnects",
+            "close_send_attempts", "close_completions", "close_failures", "cancel_calls",
+            "transfer_retirements", "roots_destroyed", "removals"
+        };
+        error = perform(handle, OP_IOCTL, OL_IOCTL_DIAGNOSTICS, &request, sizeof(request),
+                        &snapshot, sizeof(snapshot), &bytes, 5000);
+        if (error || bytes != sizeof(snapshot) || snapshot.size != sizeof(snapshot) ||
+            snapshot.version != OL_DIAGNOSTICS_ABI || snapshot.count != OL_EVENT_COUNT) {
+            fprintf(stderr, "Diagnostics query failed or ABI mismatch.\n");
+            CloseHandle(handle); return 1;
+        }
+        printf("{\"diagnostics_abi\":%u,\"removed\":%s,\"events\":{", snapshot.version,
+               (snapshot.flags & OL_DIAG_REMOVED) ? "true" : "false");
+        for (unsigned event = 0; event < OL_EVENT_COUNT; ++event)
+            printf("%s\"%s\":%llu", event ? "," : "", names[event],
+                   (unsigned long long)snapshot.events[event]);
+        printf("},\"bluetooth_channel_opened_by_this_command\":false}\n");
+        CloseHandle(handle); return 0;
     }
     if (discover) {
         error = perform(handle, OP_IOCTL, OL_IOCTL_CONNECT, &request, sizeof(request),
