@@ -74,8 +74,9 @@ static VOID ReleaseChannel(_Inout_ LAB_CHANNEL *Channel)
     PFNBTHPORT_INDICATION_CALLBACK callback = Channel->Callback;
     PVOID context = Channel->Context;
     PDEVICE_OBJECT reference = Channel->Reference;
+    INDICATION_PARAMETERS parameters = {0};
     Channel->Callback = NULL; Channel->Context = NULL; Channel->Reference = NULL;
-    if (callback != NULL) callback(context, IndicationReleaseReference, NULL);
+    if (callback != NULL) callback(context, IndicationReleaseReference, &parameters);
     if (reference != NULL) ObDereferenceObject(reference);
 }
 
@@ -109,6 +110,7 @@ VOID LabPortIo(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
     if (brb->BrbHeader.Type == BRB_L2CA_OPEN_CHANNEL &&
         brb->BrbHeader.Length == sizeof(struct _BRB_L2CA_OPEN_CHANNEL)) {
         struct _BRB_L2CA_OPEN_CHANNEL *open = (struct _BRB_L2CA_OPEN_CHANNEL *)brb;
+        INDICATION_PARAMETERS parameters = {0};
         status = WdfWaitLockAcquire(PortGate, NULL);
         if (!NT_SUCCESS(status)) { WdfRequestComplete(Request, status); return; }
         channel = NULL;
@@ -120,7 +122,7 @@ VOID LabPortIo(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
         channel->Callback = open->Callback; channel->Context = open->CallbackContext;
         channel->Reference = (PDEVICE_OBJECT)open->ReferenceObject;
         ObReferenceObject(channel->Reference);
-        channel->Callback(channel->Context, IndicationAddReference, NULL);
+        channel->Callback(channel->Context, IndicationAddReference, &parameters);
         open->ChannelHandle = (L2CAP_CHANNEL_HANDLE)(ULONG_PTR)(i + 1);
         open->OutResults.Params.Mtu = OL_MAX_PACKET; open->InResults.Params.Mtu = OL_MAX_PACKET;
         status = InterlockedExchange(&FailOpen, 0) ? STATUS_UNSUCCESSFUL : STATUS_SUCCESS;

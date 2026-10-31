@@ -10,8 +10,9 @@ C_ASSERT(sizeof(ol_native_diagnostics) == 128);
 
 VOID OlRecordEvent(PBTHECHOSAMPLE_CLIENT_CONTEXT Device, enum ol_diag_event Event)
 {
-    NT_ASSERT(Event < OL_EVENT_COUNT);
-    InterlockedIncrement64(&Device->Events[Event]);
+    unsigned index = (unsigned)Event;
+    if (index >= OL_EVENT_COUNT) { NT_ASSERT(FALSE); return; }
+    InterlockedIncrement64(&Device->Events[index]);
 }
 
 VOID OlCancelRequest(PBTHECHOSAMPLE_CLIENT_CONTEXT Device, WDFREQUEST Request)
