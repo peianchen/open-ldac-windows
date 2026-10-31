@@ -12,6 +12,20 @@ static uint8_t rate_bit(unsigned rate) {
     }
 }
 
+unsigned wl_bitrate_kbps(unsigned rate, int eqmid) {
+    unsigned highest;
+    if (!rate_bit(rate) || eqmid < LDACBT_EQMID_HQ || eqmid > LDACBT_EQMID_MQ) return 0;
+    highest = (rate == 44100 || rate == 88200) ? 909u : 990u;
+    return highest * (unsigned)(3 - eqmid) / 3;
+}
+
+int wl_bitrate_eqmid(unsigned rate, unsigned kbps) {
+    if (!kbps || !rate_bit(rate)) return -1;
+    for (int mode = LDACBT_EQMID_HQ; mode <= LDACBT_EQMID_MQ; ++mode)
+        if (wl_bitrate_kbps(rate, mode) == kbps) return mode;
+    return -1;
+}
+
 int wl_select_policy(wl_profile profile, unsigned source_rate, int allow_hires,
                      int on_battery, wl_policy *out) {
     (void)on_battery; /* Unplugging alone must never silently lower quality. */
@@ -94,7 +108,23 @@ int wl_encoder_open(wl_encoder *enc, unsigned rate, LDACBT_SMPL_FMT_T format,
         return -1;
     }
     enc->rate = rate; enc->channels = 2; enc->sample_bytes = word_bytes;
+    enc->requested_eqmid = eqmid;
     return 0;
+}
+
+int wl_encoder_set_bitrate(wl_encoder *enc, unsigned kbps) {
+    int mode;
+    if (!enc || !enc->handle || (mode = wl_bitrate_eqmid(enc->rate, kbps)) < 0) return -1;
+    if (ldacBT_set_eqmid(enc->handle, mode) != 0) {
+        enc->library_error = ldacBT_get_error_code(enc->handle);
+        return -1;
+    }
+    enc->requested_eqmid = mode;
+    return 0;
+}
+
+int wl_encoder_bitrate(const wl_encoder *enc) {
+    return enc && enc->handle ? ldacBT_get_bitrate(enc->handle) : -1;
 }
 
 int wl_encoder_push(wl_encoder *enc, const void *pcm, wl_encoded *out) {

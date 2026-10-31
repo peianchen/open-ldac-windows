@@ -19,6 +19,12 @@ stream to 96 kHz to display a higher number. The policy helper only recommends a
 rate; M0 has **no resampler** and the offline encoder encodes the WAV's actual rate.
 No claim of losslessness or a listening advantage follows from the bitrate.
 
+Manual fixed bitrate selection is implemented in the offline CLI and user-mode
+encoder API; see [bitrate control](BITRATE_CONTROL.md). HQ remains the default.
+Selecting SQ or MQ is an explicit user choice, independent of battery state.
+The actual source sampling family determines the valid numeric values; invalid
+combinations fail without resampling or silently changing the requested rate.
+
 ## Runtime architecture requirements (not implemented in M0)
 
 - Keep encoder in a user-mode process, using the floating-point hardware. Do not

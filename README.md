@@ -59,6 +59,8 @@ not bundled in the source repository. Linux CMake executable paths have no
 
 ```powershell
 ./build/wldac_cli.exe encode input.wav new-output.ldac hq
+./build/wldac_cli.exe bitrates 48000
+./build/wldac_cli.exe encode input.wav new-output.ldac --bitrate 990
 ./build/wldac_cli.exe bench 48000 hq 300
 python tools/benchmark.py build/wldac_cli.exe --output build/cpu-report.json
 ```
@@ -67,6 +69,11 @@ The encoder refuses to overwrite an existing output. WAVE_FORMAT_EXTENSIBLE and
 compressed WAV are currently rejected. An offline LDAC file is not a playable
 Windows endpoint. Benchmarks measure synthetic encoder CPU cost; **no watts,
 battery hours, RF retransmissions, or listening scores are measured**.
+
+Manual numeric selection supports 990/660/330 kbps for the 48/96 kHz family and
+909/606/303 kbps for 44.1/88.2 kHz. Omitting the encode selector defaults to HQ.
+The user-mode API also supports serialized encoder-mode changes; live headset
+controls are not implemented. See [bitrate control](docs/BITRATE_CONTROL.md).
 
 ## Native Windows driver roadmap
 

@@ -16,7 +16,8 @@ has been changed on the development laptop.
   control and queue function bodies with modeled WDF boundaries. Hardware removal
   first failed on an unexpected CLOSE, then passed after CloseNow/target-stop repair.
   This is not a kernel, BthPort or Driver Verifier result.
-- Existing core: 2,852 checks; WAV/CLI integration: 54 cases, passed locally.
+- Core including manual bitrate changes: 5,805 checks; WAV/CLI integration: 104
+  cases, passed locally. This adds codec frame-level evidence, not headset control.
 - Read-only kernel-evidence collector: driver loaded false, interfaces zero,
   verdict NOT_VERIFIED; no project driver or Verifier trial was run. No Discover,
   binding or RF trial was run. User confirms only the daily-use laptop is available.
