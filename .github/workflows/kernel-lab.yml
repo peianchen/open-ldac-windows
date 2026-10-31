@@ -24,12 +24,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Kernel lab build failed' }
           if (Select-String -LiteralPath kernel-lab-build.log -Pattern 'warning C\d{4}') { throw 'Kernel lab analysis warnings must be resolved' }
           $file = Get-Item 'build/kernel-lab/OpenLdacKernelLab.sys' -ErrorAction Stop
-          @{ build_sha=$env:GITHUB_SHA; synthetic_provider=$true; unsigned_development=$true; driver_loaded=$false; kernel_verifier_run=$false; real_bluetooth_verified=$false; sha256=(Get-FileHash $file.FullName -Algorithm SHA256).Hash } |
+          $symbols = Get-Item 'build/kernel-lab/OpenLdacKernelLab.pdb' -ErrorAction Stop
+          Copy-Item kernel-lab-build.log build/kernel-lab/kernel-lab-build.log
+          @{ build_sha=$env:GITHUB_SHA; synthetic_provider=$true; unsigned_development=$true; driver_loaded=$false; kernel_verifier_run=$false; real_bluetooth_verified=$false; sha256=(Get-FileHash $file.FullName -Algorithm SHA256).Hash; pdb_file=$symbols.Name; pdb_sha256=(Get-FileHash $symbols.FullName -Algorithm SHA256).Hash } |
             ConvertTo-Json | Set-Content build/kernel-lab/lab-manifest.json -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: kernel-lab-x64-UNSIGNED-SYNTHETIC-NOT-FOR-HOST
           path: |
             build/kernel-lab/OpenLdacKernelLab.sys
+            build/kernel-lab/OpenLdacKernelLab.pdb
             build/kernel-lab/lab-manifest.json
+            build/kernel-lab/kernel-lab-build.log
           if-no-files-found: error

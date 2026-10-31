@@ -35,6 +35,10 @@ an administrator. Test signatures/trust must exist only in the isolated guest.
 
 `driver/OpenLdacKernelLab.vcxproj` uses the same pinned WDK. The separate workflow
 builds an **unsigned VM-only artifact** and records that nothing has been loaded.
+The artifact retains the same build's PDB symbols and analysis log. The manifest
+hashes both SYS and PDB; keep these exact files with any Verifier dump rather than
+substituting symbols from a later rebuild. A packaged PDB is debugging readiness,
+not evidence that the driver has run or passed Verifier.
 The runner is a user-mode executable built from `lab_runner.c` with setup headers
 and Advapi32. Its pending operations cancel and await actual completion before
 releasing stack buffers. The host must never run the lab service or enable its
