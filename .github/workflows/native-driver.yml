@@ -20,19 +20,31 @@ jobs:
         run: nuget restore driver/packages.config -PackagesDirectory driver/.packages -NonInteractive
       - name: Build unsigned KMDF transport
         shell: pwsh
-        run: msbuild driver/OpenLdacTransport.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:Inf2CatUseLocalTime=true /v:minimal
+        run: msbuild driver/OpenLdacTransport.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:Inf2CatUseLocalTime=true /p:RunCodeAnalysis=true /v:minimal
       - name: Validate INF using Microsoft InfVerif
         shell: pwsh
         run: |
           $tool = Resolve-Path 'driver/.packages/Microsoft.Windows.WDK.x64.10.0.26100.6584/c/tools/10.0.26100.0/x64/infverif.exe'
           & $tool /w driver/OpenLdacTransport.inf
           if ($LASTEXITCODE -ne 0) { throw 'INF validation failed' }
+      - name: Verify complete unsigned package
+        shell: pwsh
+        run: |
+          $folder = 'build/native/OpenLdacTransport'
+          $files = foreach ($name in @('OpenLdacTransport.sys','OpenLdacTransport.inf','OpenLdacTransport.cat')) {
+            $item = Get-Item -LiteralPath (Join-Path $folder $name) -ErrorAction Stop
+            if ($item.Length -eq 0) { throw "Empty package file: $name" }
+            @{ name=$item.Name; bytes=$item.Length; sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash }
+          }
+          @{ build_sha=$env:GITHUB_SHA; unsigned_development=$true; driver_loaded=$false; audio_playback_verified=$false; files=@($files) } |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $folder 'package-manifest.json') -Encoding utf8
       - name: Upload unsigned development build
         uses: actions/upload-artifact@v4
         with:
           name: native-transport-x64-UNSIGNED-NOT-INSTALL-READY
           path: |
-            build/native/*.sys
-            build/native/*.inf
-            build/native/*.cat
+            build/native/OpenLdacTransport/*.sys
+            build/native/OpenLdacTransport/*.inf
+            build/native/OpenLdacTransport/*.cat
+            build/native/OpenLdacTransport/package-manifest.json
           if-no-files-found: error

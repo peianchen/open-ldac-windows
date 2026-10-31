@@ -1,8 +1,8 @@
 # Native Windows architecture decision
 
-Status: proposed architecture. M0 implements only the portable boxes described
-below. Native transport feasibility, hardware compatibility and power behavior
-still require development and measurement.
+Status: M0 portable core plus an M1 diagnostic native transport and probe.
+The WDK build/INF check has passed; driver load, hardware compatibility, playback
+and power behavior remain unverified. The full audio architecture below is proposed.
 
 ## Target path
 
@@ -11,7 +11,7 @@ Windows application / audio engine
   -> project PCM audio endpoint (future WaveRT/PortCls or supported ACX design)
   -> event-driven user-mode encoder service
   -> LDAC frames + RTP/LDAC media packets [portable core exists]
-  -> project Bluetooth profile driver [future KMDF, cancelable bounded queues]
+  -> project Bluetooth profile driver [M1 diagnostic implementation; runtime unverified]
   -> Microsoft BthPort/BthUsb + current vendor radio driver
   -> existing Bluetooth adapter -> LDAC-capable headset
 ```
@@ -76,7 +76,8 @@ a diagnostic aid but is not a substitute for the project's production endpoint.
 - Build gate: WDK compiler, static analysis and INF validation pass. This does
   not prove the driver loads or connects.
 - Load gate: explicit test machine/device, recovery procedure and valid signing
-  strategy. No driver is installed by this repository today.
+  strategy. No driver is installed by this repository today. Close-submission
+  failure rundown remains an explicit blocker before daily-use laptop installation.
 - Transport gate: actual protocol trace shows LDAC configuration accepted and
   media sent to the intended sink. A UI showing "LDAC" is insufficient.
 - Playback gate: real headset audio, pause/resume and reconnect work.

@@ -316,6 +316,10 @@ Return Value:
         goto exit2;
     }
 
+    if (requestSize > 65536) {
+        status = STATUS_INVALID_BUFFER_SIZE;
+        goto exit2;
+    }
     serverSdpRecord = ExAllocatePool2(POOL_FLAG_NON_PAGED, requestSize, POOLTAG_BTHECHOSAMPLE);
     if (NULL == serverSdpRecord)
     {
