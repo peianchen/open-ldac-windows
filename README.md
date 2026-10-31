@@ -5,8 +5,9 @@
 An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.
 
-**Development milestone M0: offline codec/protocol core. This is not an
-installable audio driver and cannot send audio to Bluetooth headphones yet.**
+**Development: M0 offline core plus an M1 native transport under validation.
+There is no installed LDAC audio driver or Windows audio endpoint yet.
+Native transport code/build results are not playback evidence.**
 
 ## What works in this milestone
 
@@ -72,7 +73,7 @@ battery hours, RF retransmissions, or listening scores are measured**.
 | Milestone | Deliverable | Status |
 | --- | --- | --- |
 | M0 | Offline codec, protocol primitives, quality/power policy and tests | Implemented; see verification report |
-| M1 | KMDF profile driver with cancelable L2CAP signaling/media channels | Not implemented |
+| M1 | KMDF L2CAP transport, XM6-specific INF and discovery probe | Source implemented; build/runtime validation tracked separately |
 | M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Not implemented |
 | M3 | Windows audio endpoint and event-driven user-mode encoding service | Not implemented |
 | M4 | Power/latency/glitch measurements, suspend/resume and coexistence | Not measured |
@@ -85,7 +86,8 @@ and [driver build prerequisites](driver/README.md).
 
 ## License and provenance
 
-- Project source: [Apache License 2.0](LICENSE).
+- Original codec/glue/probe source: [Apache License 2.0](LICENSE).
+- Microsoft-derived transport: [MS-PL](driver/LICENSE-MS-PL), with [provenance](driver/UPSTREAM.md).
 - Encoder: AOSP/Sony, pinned commit recorded in [UPSTREAM.md](vendor/libldac/UPSTREAM.md).
 - Keep [NOTICE](NOTICE) and [Sony's upstream NOTICE](vendor/libldac/NOTICE).
   The upstream notice mentions certification for use in products; this repository

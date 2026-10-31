@@ -2,7 +2,7 @@
 
 開發透過 Windows 原生藍牙堆疊播放 LDAC 的開源專案，將筆電的音質與耗電同時列為核心需求。
 
-**目前是 M0：離線編碼與協定核心。尚無可安裝的 Windows 驅動，也尚未透過藍牙傳送音訊。**
+**目前包含 M0 離線核心，以及驗證中的 M1 原生傳輸原始碼；尚未安裝驅動、驗證耳機播放或完成 Windows 音訊端點。**
 
 已實作：
 
@@ -22,5 +22,8 @@
 詳見 [英文建置說明與里程碑](README.md)、[音質與耗電設計](docs/POWER_AND_QUALITY.md)、
 [原生驅動架構](docs/NATIVE_ARCHITECTURE.md)、[驗證紀錄](docs/VERIFICATION.md)。
 
-後續工作包括 KMDF／L2CAP 傳輸驅動、完整 AVDTP 狀態機、Windows 音訊端點、
+M1 已加入針對 XM6 音訊服務的 KMDF／L2CAP 傳輸、版本化介面與探索工具，
+詳見 [原生傳輸說明](driver/README.md)。微軟範例衍生的傳輸原始碼採 MS-PL，其他原創核心採 Apache-2.0。
+
+後續工作包括原生傳輸實機驗證、完整 AVDTP 狀態機、Windows 音訊端點、
 事件驅動編碼服務、實機播放、休眠恢復及筆電耗電驗證。離線編碼成功不能當成這些工作已完成。

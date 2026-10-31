@@ -2,3 +2,7 @@ Windows LDAC is an independent experimental project.
 Includes libldac from the Android Open Source Project, copyright Sony Corporation.
 See vendor/libldac/LICENSE, vendor/libldac/NOTICE, and vendor/libldac/UPSTREAM.md.
 LDAC is a Sony trademark. No Sony certification or affiliation is claimed.
+
+Native transport under driver/transport is derived from Microsoft
+Windows-driver-samples (bthecho), copyright Microsoft Corporation, under MS-PL.
+See driver/LICENSE-MS-PL and driver/UPSTREAM.md. That directory is not Apache-2.0.

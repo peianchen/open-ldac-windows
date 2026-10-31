@@ -1,6 +1,7 @@
 /build/
 /artifacts/
 /.tools/
+/driver/.packages/
 *.etl
 *.pfx
 *.cer

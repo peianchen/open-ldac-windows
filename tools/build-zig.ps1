@@ -20,6 +20,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'CLI compilation failed' }
     & $compiler @common 'tests/core_tests.c' '-o' 'build/core_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed' }
+    & $compiler @common 'tools/native_probe.c' '-lsetupapi' '-o' 'build/wldac_probe.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Native probe compilation failed' }
     & .\build\core_tests.exe
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 } finally {

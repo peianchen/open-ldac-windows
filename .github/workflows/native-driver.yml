@@ -1,0 +1,36 @@
+name: Native transport build (no install)
+on:
+  push:
+    paths: ['driver/**', 'include/native_transport.h', 'tools/native_probe.c', '.github/workflows/native-driver.yml']
+  pull_request:
+    paths: ['driver/**', 'include/native_transport.h', 'tools/native_probe.c', '.github/workflows/native-driver.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore pinned Microsoft driver packages
+        shell: pwsh
+        run: nuget restore driver/packages.config -PackagesDirectory driver/.packages -NonInteractive
+      - name: Build unsigned KMDF transport
+        shell: pwsh
+        run: msbuild driver/OpenLdacTransport.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:Inf2CatUseLocalTime=true /v:minimal
+      - name: Validate INF using Microsoft InfVerif
+        shell: pwsh
+        run: |
+          $tool = Resolve-Path 'driver/.packages/Microsoft.Windows.WDK.x64.10.0.26100.6584/c/tools/10.0.26100.0/x64/infverif.exe'
+          & $tool /w driver/OpenLdacTransport.inf
+          if ($LASTEXITCODE -ne 0) { throw 'INF validation failed' }
+      - name: Upload unsigned development build
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-transport-x64-UNSIGNED-NOT-INSTALL-READY
+          path: |
+            build/native/*.sys
+            build/native/*.inf
+            build/native/*.cat
+          if-no-files-found: error

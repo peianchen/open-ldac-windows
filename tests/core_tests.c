@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "wldac.h"
 #include "avdtp.h"
+#include "native_transport.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -138,6 +139,11 @@ static int codec_tests(void) {
     return 0;
 }
 int main(void) {
+    CHECK(sizeof(ol_native_request) == 8);
+    CHECK(sizeof(ol_native_status) == 64);
+    CHECK(offsetof(ol_native_status, bytes_sent) == 48);
+    CHECK((OL_IOCTL_QUERY & 3) == 0 && (OL_IOCTL_CONNECT & 3) == 0);
+    CHECK(OL_MAX_INFLIGHT == 8 && OL_MAX_CHANNELS == 2 && OL_MAX_PACKET == 1008);
     if (policy_tests() || negotiation_tests() || rtp_tests() || avdtp_tests() || codec_tests()) return 1;
     printf("PASS: %u checks; offline codec/protocol/policy only; no Bluetooth playback.\n", checks);
     return 0;
