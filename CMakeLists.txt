@@ -4,6 +4,12 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_library(ldac_encoder STATIC vendor/libldac/src/ldaclib.c vendor/libldac/src/ldacBT.c)
 target_include_directories(ldac_encoder PUBLIC vendor/libldac/inc)
+if(MSVC)
+  # Upstream uses one GNU unused attribute and includes unistd.h without POSIX calls.
+  # Keep the pinned upstream source unchanged; scope compatibility to this target.
+  target_include_directories(ldac_encoder PRIVATE compat/msvc)
+  target_compile_options(ldac_encoder PRIVATE /FI${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc/compiler.h)
+endif()
 if(NOT MSVC)
   target_link_libraries(ldac_encoder PUBLIC m)
 endif()
