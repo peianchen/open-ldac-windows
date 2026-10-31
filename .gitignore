@@ -1,0 +1,15 @@
+/build/
+/artifacts/
+/.tools/
+*.etl
+*.pfx
+*.cer
+*.key
+*.ldac
+*.wav
+*.csv
+*.zip
+.vs/
+**/x64/
+**/Debug/
+**/Release/

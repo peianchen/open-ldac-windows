@@ -1,0 +1,4 @@
+Windows LDAC is an independent experimental project.
+Includes libldac from the Android Open Source Project, copyright Sony Corporation.
+See vendor/libldac/LICENSE, vendor/libldac/NOTICE, and vendor/libldac/UPSTREAM.md.
+LDAC is a Sony trademark. No Sony certification or affiliation is claimed.
