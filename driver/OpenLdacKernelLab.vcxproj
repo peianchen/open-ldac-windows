@@ -40,6 +40,7 @@
       <PreprocessorDefinitions>DBG=1;POOL_NX_OPTIN=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ExceptionHandling>false</ExceptionHandling>
     </ClCompile>
+    <Link><AdditionalDependencies>Wdmsec.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
     <Inf><TimeStamp>0.2.0.0</TimeStamp></Inf>
   </ItemDefinitionGroup>
   <ItemGroup>
