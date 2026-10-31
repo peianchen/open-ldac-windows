@@ -255,7 +255,12 @@ static NTSTATUS CreateControl(WDFDRIVER Driver, BOOLEAN Main)
         files.ExecutionLevel = WdfExecutionLevelPassive;
         WdfDeviceInitSetFileObjectConfig(init, &fileConfig, &files);
         WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&requests, OL_REQUEST_CONTEXT);
-    } else WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&requests, LAB_PORT_REQUEST);
+    } else {
+        /* This WDF macro expands to two statements. Keep both inside the
+         * branch so the main device retains OL_REQUEST_CONTEXT, not the
+         * synthetic port's smaller LAB_PORT_REQUEST context. */
+        WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&requests, LAB_PORT_REQUEST);
+    }
     WdfDeviceInitSetRequestAttributes(init, &requests);
     status = WdfDeviceCreate(&init, &attrs, &device);
     if (!NT_SUCCESS(status)) { if (init != NULL) WdfDeviceInitFree(init); return status; }
