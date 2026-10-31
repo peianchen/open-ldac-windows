@@ -99,7 +99,7 @@ EVT_WDF_FILE_CLOSE BthEchoCliEvtFileClose;
 EVT_WDF_FILE_CLEANUP OlEvtFileCleanup;
 EVT_WDF_OBJECT_CONTEXT_DESTROY OlEvtDeviceDestroy;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL OlEvtDeviceIoControl;
-VOID OlConnectChannel(WDFDEVICE Device, WDFREQUEST Request, WDFFILEOBJECT FileObject);
+VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request, _In_ WDFFILEOBJECT FileObject);
 NTSTATUS OlBeginTransfer(WDFREQUEST Request, size_t Length, ULONG Direction);
 VOID OlFinishTransfer(WDFREQUEST Request, NTSTATUS Status, size_t Bytes);
 

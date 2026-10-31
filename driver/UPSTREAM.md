@@ -11,6 +11,8 @@
 Changes: Audio Sink UUID, project interface GUID, explicit-connect IOCTL, passive
 file open/status, bounded channel/presented-transfer counts, packet/MTU validation,
 encrypted Basic L2CAP, receive depth ten, counters and cleanup handling.
+Non-WPP trace formats use ordinary printf-compatible NTSTATUS formatting, and
+the connect declaration carries matching SAL annotations for static analysis.
 
 Lifetime changes include fail-closed close-submission handling, early initialization
 of cleanup synchronization, failed-open/file-close null safety, closing/open race

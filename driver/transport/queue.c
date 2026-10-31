@@ -64,7 +64,7 @@ Arguments:
     UNREFERENCED_PARAMETER(Target);
     
     TraceEvents(TRACE_LEVEL_INFORMATION, DBG_CONNECT, 
-        "I/O completion, status: %!STATUS!", Params->IoStatus.Status);        
+        "I/O completion, status: 0x%08lx", Params->IoStatus.Status);        
 
     brb = (struct _BRB_L2CA_ACL_TRANSFER *) Context;
 
@@ -127,7 +127,7 @@ Arguments:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_WRITE, 
-            "WdfRequestRetrieveInputMemory failed, request 0x%p, Status code %!STATUS!\n", 
+            "WdfRequestRetrieveInputMemory failed, request 0x%p, Status code 0x%08lx\n", 
             Request,
             status);
 
@@ -189,7 +189,7 @@ Arguments:
         status = WdfRequestGetStatus(Request);
 
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
-            "Request send failed for request 0x%p, Brb 0x%p, Status code %!STATUS!\n", 
+            "Request send failed for request 0x%p, Brb 0x%p, Status code 0x%08lx\n", 
             Request,
             brb,
             status
@@ -247,7 +247,7 @@ Arguments:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_WRITE, 
-            "WdfRequestRetrieveInputMemory failed, request 0x%p, Status code %!STATUS!\n", 
+            "WdfRequestRetrieveInputMemory failed, request 0x%p, Status code 0x%08lx\n", 
             Request,
             status);
 
@@ -308,7 +308,7 @@ Arguments:
         status = WdfRequestGetStatus(Request);
 
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
-            "Request send failed for request 0x%p, Brb 0x%p, Status code %!STATUS!\n", 
+            "Request send failed for request 0x%p, Brb 0x%p, Status code 0x%08lx\n", 
             Request,
             brb,
             status

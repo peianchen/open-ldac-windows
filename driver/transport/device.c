@@ -155,7 +155,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "WdfDeviceCreate failed with Status code %!STATUS!\n", status);
+            "WdfDeviceCreate failed with Status code 0x%08lx\n", status);
 
         goto exit;
     }
@@ -170,7 +170,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Initialization of context failed with Status code %!STATUS!\n", status);
+            "Initialization of context failed with Status code 0x%08lx\n", status);
 
         goto exit;       
     }
@@ -210,7 +210,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP,
-                            "WdfIoQueueCreate failed  %!STATUS!\n", status);
+                            "WdfIoQueueCreate failed  0x%08lx\n", status);
         goto exit;
     }
 
@@ -228,7 +228,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Enabling device interface failed with Status code %!STATUS!\n", status);
+            "Enabling device interface failed with Status code 0x%08lx\n", status);
 
         goto exit;       
     }
@@ -376,7 +376,7 @@ Arguments:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "QueryInterface failed for Interface sdp parse interface, version %d, Status code %!STATUS!\n", 
+            "QueryInterface failed for Interface sdp parse interface, version %d, Status code 0x%08lx\n", 
             BTHDDI_SDP_PARSE_INTERFACE_VERSION_FOR_QI,
             status);
 

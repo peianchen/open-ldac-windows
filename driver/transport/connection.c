@@ -163,7 +163,7 @@ Arguments:
     if (NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_INFORMATION, DBG_CONT_READER, 
-            "Pending read completion, RepeatReader: 0x%p, status: %!STATUS!, Buffer: 0x%p, BufferSize: %d", 
+            "Pending read completion, RepeatReader: 0x%p, status: 0x%08lx, Buffer: 0x%p, BufferSize: %d", 
             repeatReader,
             Params->IoStatus.Status,
             repeatReader->TransferBrb.Buffer,
@@ -181,7 +181,7 @@ Arguments:
     else
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONT_READER, 
-            "Pending read completed with failure, RepeatReader: 0x%p, status: %!STATUS!", 
+            "Pending read completed with failure, RepeatReader: 0x%p, status: 0x%08lx", 
             repeatReader,
             Params->IoStatus.Status          
             );        
@@ -284,7 +284,7 @@ Return Value:
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONT_READER, 
             "Creating request for pending read failed, "
-            "Status code %!STATUS!\n",
+            "Status code 0x%08lx\n",
             status
             );
 
@@ -322,7 +322,7 @@ Return Value:
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONT_READER, 
             "Creating memory for pending read failed, "
-            "Status code %!STATUS!\n",
+            "Status code 0x%08lx\n",
             status
             );
 
@@ -456,7 +456,7 @@ Return Value:
         status = WdfRequestGetStatus(RepeatReader->RequestPendingRead);
 
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONT_READER, 
-            "Request send failed for request 0x%p, Brb 0x%p, Status code %!STATUS!\n", 
+            "Request send failed for request 0x%p, Brb 0x%p, Status code 0x%08lx\n", 
             RepeatReader->RequestPendingRead,
             brb,
             status
@@ -931,7 +931,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONNECT, 
-            "WdfObjectCreate for connection object failed, Status code %!STATUS!\n", status);
+            "WdfObjectCreate for connection object failed, Status code 0x%08lx\n", status);
         
         goto exit;
     }
@@ -941,7 +941,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONNECT, 
-            "Context initialize for connection object failed, ConnectionObject 0x%p, Status code %!STATUS!\n",
+            "Context initialize for connection object failed, ConnectionObject 0x%p, Status code 0x%08lx\n",
             connectionObject,
             status
             );
@@ -1110,7 +1110,7 @@ Return Value:
          * under target-stop/allocation failure and is an explicit install gate:
          * a guaranteed retirement/retry path needs fault-injection validation. */
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONNECT,
-            "CLOSE submission failed; channel rundown remains pending: %!STATUS!", disconnectStatus);
+            "CLOSE submission failed; channel rundown remains pending: 0x%08lx", disconnectStatus);
     }
 
     return TRUE;
@@ -1200,7 +1200,7 @@ Arguments:
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
             "Creating preallocted memory for Brb 0x%p failed, Request to be formatted 0x%p, "
-            "Status code %!STATUS!\n",
+            "Status code 0x%08lx\n",
             Brb,
             Request,
             status
@@ -1224,7 +1224,7 @@ Arguments:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
-            "Formatting request 0x%p with Brb 0x%p failed, Status code %!STATUS!\n",
+            "Formatting request 0x%p with Brb 0x%p failed, Status code 0x%08lx\n",
             Request,
             Brb,
             status
@@ -1295,7 +1295,7 @@ Return Value:
             status = STATUS_INSUFFICIENT_RESOURCES;
 
             TraceEvents(TRACE_LEVEL_ERROR, DBG_WRITE, 
-                "Failed to allocate BRB_L2CA_ACL_TRANSFER, returning status code %!STATUS!\n", status);
+                "Failed to allocate BRB_L2CA_ACL_TRANSFER, returning status code 0x%08lx\n", status);
 
             goto exit;
         }
@@ -1322,7 +1322,7 @@ Return Value:
         status = STATUS_BUFFER_OVERFLOW;
 
         TraceEvents(TRACE_LEVEL_ERROR, DBG_WRITE, 
-            "Buffer passed in longer than max ULONG, returning status code %!STATUS!\n", status);
+            "Buffer passed in longer than max ULONG, returning status code 0x%08lx\n", status);
 
         goto exit;        
     }

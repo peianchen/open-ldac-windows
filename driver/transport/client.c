@@ -78,7 +78,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "QueryInterface failed for Interface profile driver interface, version %d, Status code %!STATUS!\n", 
+            "QueryInterface failed for Interface profile driver interface, version %d, Status code 0x%08lx\n", 
             BTHDDI_PROFILE_DRIVER_INTERFACE_VERSION_FOR_QI,
             status);
 
@@ -141,7 +141,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Failed to obtain server device info, Status code %!STATUS!\n", status);
+            "Failed to obtain server device info, Status code 0x%08lx\n", status);
 
         goto exit;
     }
@@ -210,7 +210,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Failed to allocate request for retriving server sdp record, Status code %!STATUS!\n", status);
+            "Failed to allocate request for retriving server sdp record, Status code 0x%08lx\n", status);
 
         goto exit;        
     }
@@ -248,7 +248,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "IOCTL_BTH_SDP_CONNECT failed, Status code %!STATUS!\n", status);
+            "IOCTL_BTH_SDP_CONNECT failed, Status code 0x%08lx\n", status);
 
         goto exit1;
     }
@@ -293,7 +293,7 @@ Return Value:
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
             "IOCTL_BTH_SDP_SERVICE_ATTRIBUTE_SEARCH failed while querying response size, "
-            "status code %!STATUS!\n", status);
+            "status code 0x%08lx\n", status);
 
         goto exit2;
     }
@@ -311,7 +311,7 @@ Return Value:
     if(!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-            "SDP record size too large, status code %!STATUS!\n", status);
+            "SDP record size too large, status code 0x%08lx\n", status);
 
         goto exit2;
     }
@@ -325,7 +325,7 @@ Return Value:
     {
         status = STATUS_INSUFFICIENT_RESOURCES;
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-            "Allocating SDP record failed, returning status code %!STATUS!\n", status); 
+            "Allocating SDP record failed, returning status code 0x%08lx\n", status); 
 
         goto exit2;
     }
@@ -364,7 +364,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-            "IOCTL_BTH_SDP_SERVICE_ATTRIBUTE_SEARCH failed, status code %!STATUS!\n", status);
+            "IOCTL_BTH_SDP_SERVICE_ATTRIBUTE_SEARCH failed, status code 0x%08lx\n", status);
 
         ExFreePoolWithTag(serverSdpRecord, POOLTAG_BTHECHOSAMPLE);
     }
@@ -407,7 +407,7 @@ exit2:
     if (!NT_SUCCESS(disconnectStatus))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "IOCTL_BTH_SDP_DISCONNECT failed, Status code %!STATUS!\n", status);
+            "IOCTL_BTH_SDP_DISCONNECT failed, Status code 0x%08lx\n", status);
     }
     
 exit1:    
@@ -462,7 +462,7 @@ Return Value:
     {
         status = STATUS_DEVICE_DATA_ERROR;
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-            "Getting first element from SDP record failed, returning status code %!STATUS!\n", status);
+            "Getting first element from SDP record failed, returning status code 0x%08lx\n", status);
         goto exit;
     }
 
@@ -476,7 +476,7 @@ Return Value:
     if(!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-            "Converting SDP record to tree failed, status code %!STATUS!\n", status);
+            "Converting SDP record to tree failed, status code 0x%08lx\n", status);
         goto exit;
     }
 
@@ -492,7 +492,7 @@ Return Value:
     if(!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-            "FindAttribute failed for SDP_ATTRIB_PROTOCOL_DESCRIPTOR_LIST, status code %!STATUS!\n", status);
+            "FindAttribute failed for SDP_ATTRIB_PROTOCOL_DESCRIPTOR_LIST, status code 0x%08lx\n", status);
         goto exit0;
     }
 
@@ -560,7 +560,7 @@ SdpFormatError:
     status = STATUS_DEVICE_DATA_ERROR;
 
     TraceEvents(TRACE_LEVEL_ERROR, DBG_SDP, 
-        "Parsing error due to invalid SDP record, returning status code %!STATUS!\n", status);
+        "Parsing error due to invalid SDP record, returning status code 0x%08lx\n", status);
     
 exit0:
 
@@ -690,7 +690,7 @@ Return Value:
     status = Params->IoStatus.Status;
 
     TraceEvents(TRACE_LEVEL_INFORMATION, DBG_CONNECT, 
-        "Connection completion, status: %!STATUS!", status);        
+        "Connection completion, status: 0x%08lx", status);        
 
     brb = (struct _BRB_L2CA_OPEN_ENHANCED_CHANNEL *) Context;
 
@@ -872,7 +872,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONNECT, 
-            "Sending brb for opening connection failed, returning status code %!STATUS!\n", status);
+            "Sending brb for opening connection failed, returning status code 0x%08lx\n", status);
 
         goto exit;
     }            
@@ -1015,7 +1015,7 @@ Return Value:
     status = Params->IoStatus.Status;
 
     TraceEvents(TRACE_LEVEL_INFORMATION, DBG_CONNECT, 
-        "Connection completion, status: %!STATUS!", status);        
+        "Connection completion, status: 0x%08lx", status);        
 
     brb = (struct _BRB_L2CA_OPEN_CHANNEL *) Context;
 
@@ -1188,7 +1188,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_CONNECT, 
-            "Sending brb for opening connection failed, returning status code %!STATUS!\n", status);
+            "Sending brb for opening connection failed, returning status code 0x%08lx\n", status);
 
         goto exit;
     }            

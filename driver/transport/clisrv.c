@@ -77,7 +77,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Failed to pre-allocate request in device context, Status code %!STATUS!\n", status);
+            "Failed to pre-allocate request in device context, Status code 0x%08lx\n", status);
 
         goto exit;        
     }
@@ -124,7 +124,7 @@ Return Value:
         status = STATUS_INSUFFICIENT_RESOURCES;
 
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Failed to allocate brb BRB_HCI_GET_LOCAL_BD_ADDR, returning status code %!STATUS!\n", status);        
+            "Failed to allocate brb BRB_HCI_GET_LOCAL_BD_ADDR, returning status code 0x%08lx\n", status);        
 
         goto exit;
     }
@@ -139,7 +139,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Retrieving local bth address failed, Status code %!STATUS!\n", status);        
+            "Retrieving local bth address failed, Status code 0x%08lx\n", status);        
 
         goto exit1;        
     }
@@ -156,7 +156,7 @@ Return Value:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "Sending IOCTL for reading supported features failed, Status code %!STATUS!\n", status);
+            "Sending IOCTL for reading supported features failed, Status code 0x%08lx\n", status);
 
         goto exit1;
     }
@@ -300,7 +300,7 @@ Notes:
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
             "Creating preallocted memory for Brb 0x%p failed, Request to be formatted 0x%p, "
-            "Status code %!STATUS!\n",
+            "Status code 0x%08lx\n",
             Brb,
             Request,
             status
@@ -324,7 +324,7 @@ Notes:
     if (!NT_SUCCESS(status))
     {
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
-            "Formatting request 0x%p with Brb 0x%p failed, Status code %!STATUS!\n",
+            "Formatting request 0x%p with Brb 0x%p failed, Status code 0x%08lx\n",
             Request,
             Brb,
             status
@@ -351,7 +351,7 @@ Notes:
         status = WdfRequestGetStatus(Request);
 
         TraceEvents(TRACE_LEVEL_ERROR, DBG_UTIL, 
-            "Request send failed for request 0x%p, Brb 0x%p, Status code %!STATUS!\n", 
+            "Request send failed for request 0x%p, Brb 0x%p, Status code 0x%08lx\n", 
             Request,
             Brb,
             status

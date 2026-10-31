@@ -20,7 +20,10 @@ jobs:
         run: nuget restore driver/packages.config -PackagesDirectory driver/.packages -NonInteractive
       - name: Build unsigned KMDF transport
         shell: pwsh
-        run: msbuild driver/OpenLdacTransport.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:Inf2CatUseLocalTime=true /p:RunCodeAnalysis=true /v:minimal
+        run: |
+          msbuild driver/OpenLdacTransport.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:Inf2CatUseLocalTime=true /p:RunCodeAnalysis=true /v:minimal 2>&1 | Tee-Object native-build.log
+          if ($LASTEXITCODE -ne 0) { throw 'Native build or analysis failed' }
+          if (Select-String -LiteralPath native-build.log -Pattern 'warning C\d{4}') { throw 'Native compiler/static-analysis warnings must be resolved' }
       - name: Validate INF using Microsoft InfVerif
         shell: pwsh
         run: |
