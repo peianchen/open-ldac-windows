@@ -1,5 +1,15 @@
 # Open LDAC Windows
 
+## 研究背景、原理與開發紀錄
+
+這個預設分支仍是 M0 離線里程碑；以下文件記錄 M1 開發分支的研究與實作，
+並區分已完成的合成核心驗證，以及尚待驗證的實機、音訊與耗電工作。
+
+- [研究背景、原理與實驗方法](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/RESEARCH_BACKGROUND.zh-TW.md)
+- [完整開發教學與實際除錯案例](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_GUIDE.zh-TW.md)
+- [開發歷程與心得](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_JOURNAL.zh-TW.md)
+- [核心基準與標準 Verifier 實測報告](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/validation/KERNEL_LAB_2026-11-01.md)
+
 開發透過 Windows 原生藍牙堆疊播放 LDAC 的開源專案，將筆電的音質與耗電同時列為核心需求。
 
 **目前是 M0：離線編碼與協定核心。尚無可安裝的 Windows 驅動，也尚未透過藍牙傳送音訊。**

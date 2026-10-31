@@ -1,5 +1,16 @@
 # Open LDAC Windows
 
+## Research and development notes (Traditional Chinese)
+
+This default branch remains the M0 offline milestone. The following documents
+describe the ongoing M1 development branch, its executed synthetic-kernel tests,
+and its remaining hardware/audio/power gates.
+
+- [Background, principles and research methods](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/RESEARCH_BACKGROUND.zh-TW.md)
+- [Step-by-step development tutorial](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_GUIDE.zh-TW.md)
+- [Development journal and reflections](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_JOURNAL.zh-TW.md)
+- [Executed kernel-lab and standard Verifier record](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/validation/KERNEL_LAB_2026-11-01.md)
+
 [繁體中文](README.zh-TW.md)
 
 An independent open-source project developing LDAC playback through Windows'
