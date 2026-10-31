@@ -3,7 +3,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Zig,
     [Parameter(Mandatory=$true)][string]$Wdk,
-    [Parameter(Mandatory=$true)][string]$Sdk
+    [Parameter(Mandatory=$true)][string]$Sdk,
+    [switch]$KernelLab
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -42,6 +43,11 @@ try {
     }
     & $zigExe @flags '-c' (Join-Path $root 'src/lifetime.c') '-o' (Join-Path $out 'lifetime.obj')
     if ($LASTEXITCODE -ne 0) { throw 'Lifecycle engine compile failed' }
+    if ($KernelLab) {
+        & $zigExe @flags "-I$root/tests/kernel" '-c' (Join-Path $root 'tests/kernel/lab_driver.c') '-o' (Join-Path $out 'lab_driver.obj')
+        if ($LASTEXITCODE -ne 0) { throw 'Kernel lab compile failed' }
+        Write-Output 'Synthetic-provider kernel lab translation unit compiled (not loaded).'
+    }
     Write-Output 'Eight native translation units compiled. Use MSBuild/WDK for linking and INF packaging. No SYS was produced or installed.'
 } finally {
     $env:TEMP = $oldTemp
