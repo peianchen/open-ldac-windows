@@ -76,12 +76,12 @@ VOID OlEvtDeviceIoControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLengt
         output->max_packet = OL_MAX_PACKET;
         output->max_channels = OL_MAX_CHANNELS;
         output->max_in_flight = OL_MAX_INFLIGHT;
-        output->in_flight = (uint32_t)InterlockedCompareExchange(&dev->InFlight, 0, 0);
-        output->bytes_sent = (uint64_t)InterlockedCompareExchange64(&dev->BytesSent, 0, 0);
-        output->bytes_received = (uint64_t)InterlockedCompareExchange64(&dev->BytesReceived, 0, 0);
+        output->in_flight = (ol_u32)InterlockedCompareExchange(&dev->InFlight, 0, 0);
+        output->bytes_sent = (ol_u64)InterlockedCompareExchange64(&dev->BytesSent, 0, 0);
+        output->bytes_received = (ol_u64)InterlockedCompareExchange64(&dev->BytesReceived, 0, 0);
         if (file->Connection != NULL) {
             WdfSpinLockAcquire(file->Connection->ConnectionLock);
-            output->connection_state = (uint32_t)file->Connection->ConnectionState;
+            output->connection_state = (ol_u32)file->Connection->ConnectionState;
             output->outbound_mtu = file->Connection->OutMTU;
             output->inbound_mtu = file->Connection->InMTU;
             WdfSpinLockRelease(file->Connection->ConnectionLock);
