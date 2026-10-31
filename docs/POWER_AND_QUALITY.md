@@ -13,7 +13,8 @@ power, battery life, live Bluetooth, or perceptual audio measurements exist yet.
 
 909/606 kbps apply to the 44.1 kHz family, 990/660 to the 48 kHz family.
 These are upstream codec specifications, not measured radio throughput.
-Unplugging the laptop does not change the chosen quality. Never upsample every
+Audio quality takes priority over battery savings. Unplugging the laptop does
+not change the chosen quality. Never upsample every
 stream to 96 kHz to display a higher number. The policy helper only recommends a
 rate; M0 has **no resampler** and the offline encoder encodes the WAV's actual rate.
 No claim of losslessness or a listening advantage follows from the bitrate.
@@ -40,6 +41,11 @@ No claim of losslessness or a listening advantage follows from the bitrate.
 - Measure batching against added latency; large queues can waste retransmission
   energy and cause stale audio. Do not claim HQ is the most energy-efficient
   profile without RF/CPU/battery measurements.
+
+M1 close/cancel uses completion-driven cleanup and at most two immediate
+failed-submit attempts. It adds no retry timer or polling loop. This is a code
+property, not a measured battery saving. A provider-owned root can remain retained
+until callback retirement; measuring D0/idle effects of that fault is a load gate.
 
 ## Reproducible measurement plan
 

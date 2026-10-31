@@ -39,6 +39,8 @@ typedef struct _BTHECHOSAMPLE_CLIENT_CONTEXT
     //
     BTH_ADDR                                ServerBthAddress;
     volatile LONG ActiveFiles;
+    volatile LONG Connections;
+    volatile LONG RetainedConnections;
     volatile LONG InFlight;
     volatile LONG64 BytesSent;
     volatile LONG64 BytesReceived; 
@@ -57,7 +59,7 @@ typedef struct _BTHECHOSAMPLE_CLIENT_FILE_CONTEXT
     //
     // Server PSM
     //
-    USHORT                  ServerPsm;
+    WDFSPINLOCK Lock;
     volatile LONG ConnectIssued;
     volatile LONG Closing;
     BOOLEAN Counted;    
@@ -70,6 +72,9 @@ typedef struct _OL_REQUEST_CONTEXT {
     BRB Brb;
     volatile LONG TransferActive;
     ULONG Direction;
+    volatile LONG CancelWanted;
+    PBTHECHO_CONNECTION Connection;
+    ULONG Slot;
 } OL_REQUEST_CONTEXT;
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(OL_REQUEST_CONTEXT, GetOlRequestContext);
 #define GetRequestContext(Request) (&GetOlRequestContext(Request)->Brb)    
@@ -102,12 +107,4 @@ EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL OlEvtDeviceIoControl;
 VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request, _In_ WDFFILEOBJECT FileObject);
 NTSTATUS OlBeginTransfer(WDFREQUEST Request, size_t Length, ULONG Direction);
 VOID OlFinishTransfer(WDFREQUEST Request, NTSTATUS Status, size_t Bytes);
-
-NTSTATUS
-BthEchoCliConnectionStateConnected(
-    _In_ WDFFILEOBJECT  FileObject,
-    _In_ PBTHECHO_CONNECTION Connection
-    );
-
-
 

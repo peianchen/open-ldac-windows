@@ -22,6 +22,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed' }
     & $compiler @common 'tools/native_probe.c' '-lsetupapi' '-o' 'build/wldac_probe.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Native probe compilation failed' }
+    & $compiler 'cc' '-target' 'x86_64-windows-gnu' '-mcpu=baseline' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-Iinclude' 'src/lifetime.c' 'tests/lifetime_tests.c' '-o' 'build/lifetime_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Lifecycle test compilation failed' }
+    & .\build\lifetime_tests.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Lifecycle tests failed' }
     & .\build\core_tests.exe
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 } finally {

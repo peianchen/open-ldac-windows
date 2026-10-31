@@ -10,7 +10,7 @@ typedef ULONGLONG ol_u64;
 typedef uint32_t ol_u32;
 typedef uint64_t ol_u64;
 #endif
-#define OL_NATIVE_ABI 1u
+#define OL_NATIVE_ABI 2u
 #define OL_DEVICE_TYPE 0x8337u
 #define OL_MAX_PACKET 1008u
 #define OL_MAX_CHANNELS 2u
@@ -20,6 +20,12 @@ typedef uint64_t ol_u64;
 #define OL_NATIVE_INTERFACE_GUID {0x8cbef89d,0x00a0,0x4694,{0xa3,0x2e,0x22,0x0c,0xb9,0x6c,0x01,0x91}}
 #define OL_FLAG_TRANSPORT_ONLY 1u
 #define OL_FLAG_ENCRYPTION_REQUIRED 2u
+#define OL_FLAG_RETAINED_CONTEXT 4u
+#define OL_STATE_IDLE 0u
+#define OL_STATE_OPENING 1u
+#define OL_STATE_OPEN 2u
+#define OL_STATE_CLOSING 3u
+#define OL_STATE_RETIRED 4u
 typedef struct {
     ol_u32 size;
     ol_u32 version;
@@ -27,7 +33,7 @@ typedef struct {
 typedef struct {
     ol_u32 size, version, flags, connection_state;
     ol_u32 outbound_mtu, inbound_mtu, max_packet, max_channels;
-    ol_u32 in_flight, max_in_flight, reserved0, reserved1;
+    ol_u32 in_flight, max_in_flight, connections, retained_connections;
     ol_u64 bytes_sent, bytes_received;
 } ol_native_status;
 /* The transport only exchanges packets. No codec/quality/audio endpoint is implied. */

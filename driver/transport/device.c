@@ -39,7 +39,6 @@ Environment:
 
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text (PAGE, BthEchoCliEvtDriverDeviceAdd)
-#pragma alloc_text (PAGE, OlConnectChannel)
 #pragma alloc_text (PAGE, BthEchoCliEvtFileClose)
 #endif
 
@@ -295,154 +294,6 @@ exit:
     return status;
 }
 
-NTSTATUS
-BthEchoCliConnectionStateConnected(
-    _In_ WDFFILEOBJECT  FileObject,
-    _In_ PBTHECHO_CONNECTION Connection
-    )
-/*++
-Description:
-
-    This routine is invoked by BthEchoCliRemoteConnectCompletion
-    function in client.c when opening a remote
-    connection is completed.
-
-    In this routine we set the file context to the connection passed in.
-
-Arguments:
-
-    FileObject - File object whose open resulted in open connection
-    Connection - Our data strucutre to track open connection
-
-Return Value:
-
-    NTSTATUS Status code.
---*/
-{
-    GetFileContext(FileObject)->Connection = Connection;
-    return InterlockedCompareExchange(&GetFileContext(FileObject)->Closing, 0, 0)
-        ? STATUS_CANCELLED : STATUS_SUCCESS;
-}
-
-VOID
-OlConnectChannel(
-    _In_ WDFDEVICE  Device,
-    _In_ WDFREQUEST  Request,
-    _In_ WDFFILEOBJECT  FileObject
-    )
-/*++
-Description:
-
-    This routine is invoked by Framework when an application opens a handle
-    to our device.
-
-    In response we open a remote connection to the server.
-
-Arguments:
-
-    Device - Framework device object
-    Request - Create request
-    FileObject - File object corresponding to Create
---*/
-{
-    NTSTATUS status;
-    PBTH_SDP_STREAM_RESPONSE serverSdpRecord = NULL;
-    PBTHECHOSAMPLE_CLIENT_CONTEXT devCtx = GetClientDeviceContext(Device);
-    PBTHECHOSAMPLE_CLIENT_FILE_CONTEXT fileCtx = GetFileContext(FileObject);
-    BTHDDI_SDP_PARSE_INTERFACE sdpParseInterface = {0};
-        
-    PAGED_CODE();
-
-    //
-    // We need to obtained PSM from the server
-    // For this, first we retrieve the SDP record
-    //
-    
-    status = BthEchoCliRetrieveServerSdpRecord(devCtx, &serverSdpRecord);
-    if (!NT_SUCCESS(status))
-    {
-        goto exit;
-    }
-
-    status = WdfFdoQueryForInterface(
-        Device,
-        &GUID_BTHDDI_SDP_PARSE_INTERFACE, 
-        (PINTERFACE) (&sdpParseInterface),
-        sizeof(sdpParseInterface), 
-        BTHDDI_SDP_PARSE_INTERFACE_VERSION_FOR_QI, 
-        NULL
-        );
-                
-    if (!NT_SUCCESS(status))
-    {
-        TraceEvents(TRACE_LEVEL_ERROR, DBG_PNP, 
-            "QueryInterface failed for Interface sdp parse interface, version %d, Status code 0x%08lx\n", 
-            BTHDDI_SDP_PARSE_INTERFACE_VERSION_FOR_QI,
-            status);
-
-        goto exit;
-    }
-
-    //
-    // Once we retrieved the server SDP record, we retrieve
-    // PSM from this record.
-    //
-    // We store this Psm in our file context and use it in open
-    // and close channel BRBs.
-    //
-
-    status = BthEchoCliRetrievePsmFromSdpRecord(
-        &sdpParseInterface,
-        serverSdpRecord,
-        &fileCtx->ServerPsm
-        );
-    
-    if (!NT_SUCCESS(status))
-    {
-        goto exit;
-    }
-
-    if (fileCtx->ServerPsm != 0x0019) {
-        status = STATUS_DEVICE_PROTOCOL_ERROR;
-        goto exit;
-    }
-
-    //
-    // Open remote connection to the server
-    // We format Create request for this purpose.
-    //
-    // This means that any cancellation of Create propagates
-    // to cancellation of open channel BRB.
-    //
-    status = BthEchoCliOpenRemoteConnection(
-        devCtx,
-        FileObject,
-        Request
-        );
-
-exit:
-    if (NULL != serverSdpRecord)
-    {
-        //
-        // Free the Server SDP record
-        //
-        ExFreePoolWithTag(serverSdpRecord, POOLTAG_BTHECHOSAMPLE);
-    }    
-    if (sdpParseInterface.Interface.InterfaceDereference != NULL) {
-        sdpParseInterface.Interface.InterfaceDereference(sdpParseInterface.Interface.Context);
-    }
-
-    //
-    // If we failed we complete the request here
-    // If it succeeds RemoteConnectCompletion will complete the request
-    //
-
-    if (!NT_SUCCESS(status))
-    {
-        WdfRequestComplete(Request, status);        
-    }
-}
-
 VOID
 BthEchoCliEvtFileClose(
     _In_ WDFFILEOBJECT  FileObject
@@ -462,21 +313,12 @@ Arguments:
 --*/
 {    
     PBTHECHOSAMPLE_CLIENT_CONTEXT devCtx;
-    PBTHECHO_CONNECTION connection;
 
     PAGED_CODE();
 
     devCtx = GetClientDeviceContext(WdfFileObjectGetDevice(FileObject));
 
-    connection =  GetFileContext(FileObject)->Connection;
-
-    //
-    // Since this routine is called at passive level we can disconnect
-    // synchronously.
-    //
-    if (connection != NULL) {
-        BthEchoConnectionObjectRemoteDisconnectSynchronously(&devCtx->Header, connection);
-    }
+    OlFileDetach(FileObject); /* Idempotent, nonblocking. */
     if (GetFileContext(FileObject)->Counted) {
         GetFileContext(FileObject)->Counted = FALSE;
         InterlockedDecrement(&devCtx->ActiveFiles);

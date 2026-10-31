@@ -142,10 +142,10 @@ int main(int argc, char **argv)
     }
     if (!discover) {
         printf("{\"abi\":%u,\"connection_state\":%u,\"outbound_mtu\":%u,\"inbound_mtu\":%u,"
-               "\"in_flight\":%u,\"bytes_sent\":%llu,\"bytes_received\":%llu,"
+               "\"connections\":%u,\"retained_connections\":%u,\"in_flight\":%u,\"bytes_sent\":%llu,\"bytes_received\":%llu,"
                "\"bluetooth_channel_opened_by_this_command\":false}\n",
                state.version, state.connection_state, state.outbound_mtu, state.inbound_mtu,
-               state.in_flight, (unsigned long long)state.bytes_sent,
+               state.connections, state.retained_connections, state.in_flight, (unsigned long long)state.bytes_sent,
                (unsigned long long)state.bytes_received);
         CloseHandle(handle); return 0;
     }

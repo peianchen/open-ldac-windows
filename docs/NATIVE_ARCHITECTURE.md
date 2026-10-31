@@ -43,8 +43,10 @@ system service, autorun entry or permanent background polling is supplied by M0.
    service or advertise an untested all-device hardware match.
 2. Query `GUID_BTHDDI_PROFILE_DRIVER_INTERFACE` and retrieve the remote service
    address through the documented BthEnum interface. Do not hardcode a MAC.
-3. Resolve/validate SDP protocol descriptors, then open the AVDTP signaling
-   channel (PSM 0x0019) using `BRB_L2CA_OPEN_CHANNEL`. Add a media channel only in
+3. M1 binds only the observed XM6 Audio Sink service and uses the fixed AVDTP
+   signaling PSM 0x0019 without synchronous per-open SDP. A future general-device
+   implementation must resolve/validate SDP protocol descriptors asynchronously.
+   Open the signaling channel using `BRB_L2CA_OPEN_CHANNEL`. Add a media channel only in
    the proper negotiated OPEN state. PSM availability alone does not mean A2DP
    configuration succeeded.
 4. Exchange packets through `BRB_L2CA_ACL_TRANSFER`; respect negotiated outbound
@@ -76,8 +78,9 @@ a diagnostic aid but is not a substitute for the project's production endpoint.
 - Build gate: WDK compiler, static analysis and INF validation pass. This does
   not prove the driver loads or connects.
 - Load gate: explicit test machine/device, recovery procedure and valid signing
-  strategy. No driver is installed by this repository today. Close-submission
-  failure rundown remains an explicit blocker before daily-use laptop installation.
+  strategy. No driver is installed by this repository today. Nonblocking lifecycle
+  source and host fault tests exist; actual provider callback retirement, kernel
+  allocation/cancel/removal and Verifier acceptance remain load blockers.
 - Transport gate: actual protocol trace shows LDAC configuration accepted and
   media sent to the intended sink. A UI showing "LDAC" is insufficient.
 - Playback gate: real headset audio, pause/resume and reconnect work.

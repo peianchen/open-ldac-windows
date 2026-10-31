@@ -1,9 +1,9 @@
 name: Native transport build (no install)
 on:
   push:
-    paths: ['driver/**', 'include/native_transport.h', 'tools/native_probe.c', '.github/workflows/native-driver.yml']
+    paths: ['driver/**', 'include/native_transport.h', 'include/lifetime.h', 'src/lifetime.c', 'tools/native_probe.c', '.github/workflows/native-driver.yml']
   pull_request:
-    paths: ['driver/**', 'include/native_transport.h', 'tools/native_probe.c', '.github/workflows/native-driver.yml']
+    paths: ['driver/**', 'include/native_transport.h', 'include/lifetime.h', 'src/lifetime.c', 'tools/native_probe.c', '.github/workflows/native-driver.yml']
   workflow_dispatch:
 permissions:
   contents: read

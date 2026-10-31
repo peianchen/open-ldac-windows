@@ -50,6 +50,7 @@
     <ClCompile Include="transport\clisrv.c" />
     <ClCompile Include="transport\connection.c" />
     <ClCompile Include="transport\control.c" />
+    <ClCompile Include="..\src\lifetime.c" />
     <Inf Include="OpenLdacTransport.inf" />
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>

@@ -40,7 +40,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Native clang compile failed: $source" }
         $objects += $object
     }
-    Write-Output 'Seven native translation units compiled. Use MSBuild/WDK for linking and INF packaging. No SYS was produced or installed.'
+    & $zigExe @flags '-c' (Join-Path $root 'src/lifetime.c') '-o' (Join-Path $out 'lifetime.obj')
+    if ($LASTEXITCODE -ne 0) { throw 'Lifecycle engine compile failed' }
+    Write-Output 'Eight native translation units compiled. Use MSBuild/WDK for linking and INF packaging. No SYS was produced or installed.'
 } finally {
     $env:TEMP = $oldTemp
     $env:TMP = $oldTmp
