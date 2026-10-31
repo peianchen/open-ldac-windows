@@ -86,7 +86,10 @@ bodies, but cannot prove real WDF scheduling, IRQL or BthPort behavior.
 
 The callback contract with a non-null WDM `ReferenceObject`, device removal,
 Verifier fault injection and a valid signing/rollback strategy are still **load
-gates**, not established by host tests. No isolated Windows test setup is available yet.
+gates**, not established by host tests. An isolated real-WDF synthetic-provider
+lab now passed baseline and targeted standard Verifier cases, including unload;
+see the [executed report](../docs/validation/KERNEL_LAB_2026-11-01.md).
+It does not verify the production transport against BthPort or the real headset.
 See [lifecycle design](../docs/LIFETIME.md) and [kernel matrix](../docs/KERNEL_TEST_MATRIX.md).
 
 ## Licensing

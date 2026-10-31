@@ -2,6 +2,11 @@
 
 [繁體中文](README.zh-TW.md)
 
+Traditional Chinese: [research background](docs/RESEARCH_BACKGROUND.zh-TW.md),
+[development tutorial](docs/DEVELOPMENT_GUIDE.zh-TW.md),
+[development journal](docs/DEVELOPMENT_JOURNAL.zh-TW.md), and
+[executed kernel-lab record](docs/validation/KERNEL_LAB_2026-11-01.md).
+
 An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.
 
@@ -90,9 +95,11 @@ The design keeps the existing Windows Bluetooth radio/transport drivers and
 uses public Bluetooth profile DDIs. It does not claim that a registry key adds a
 codec to Microsoft's A2DP driver. See [native architecture](docs/NATIVE_ARCHITECTURE.md)
 and [driver build prerequisites](driver/README.md).
-Core callback/Verifier runtime acceptance is pending an isolated Windows test
-environment; see the [kernel test matrix](docs/KERNEL_TEST_MATRIX.md). Host adapter
-fault tests and passive diagnostics do not satisfy that gate.
+An isolated real-WDF lab with a synthetic provider passed its baseline and targeted
+standard Verifier cases on `36bc35f`; see the [executed record](docs/validation/KERNEL_LAB_2026-11-01.md).
+Real BthPort/PnP, additional fault profiles and hardware acceptance remain pending;
+see the [kernel test matrix](docs/KERNEL_TEST_MATRIX.md). Host adapter tests and
+the synthetic provider do not establish real Bluetooth or headset compatibility.
 
 ## License and provenance
 

@@ -6,8 +6,10 @@ client/connection/control/queue and original lifecycle implementation against
 physical radio and creates no Windows audio endpoint. It does not establish
 BthPort, Audio Sink PDO/PnP, real MediaTek/XM6 or electrical-power correctness.
 
-Status: source and local WDK-header compile implemented; runtime/Verifier results
-must be recorded separately. Never interpret a build as a passed kernel test.
+Status: source/build plus executed isolated-VM baseline and targeted standard
+Verifier cases on `36bc35f`, including unload. See the [dated record](../../docs/validation/KERNEL_LAB_2026-11-01.md)
+for hashes, the initial crash/fix, 363 checks, runtime evidence and remaining gaps.
+Never interpret a build or this limited lab run as real Bluetooth acceptance.
 
 ## Design
 

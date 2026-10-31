@@ -1,8 +1,10 @@
 # Native Windows architecture decision
 
 Status: M0 portable core plus an M1 diagnostic native transport and probe.
-The WDK build/INF check has passed; driver load, hardware compatibility, playback
-and power behavior remain unverified. The full audio architecture below is proposed.
+The WDK build/INF check has passed. A separate real-WDF synthetic-provider lab
+passed baseline/standard Verifier cases; the production Bluetooth transport's
+actual BthPort load, hardware compatibility, playback and power remain unverified.
+The full audio architecture below is proposed. See the [executed lab record](validation/KERNEL_LAB_2026-11-01.md).
 
 ## Target path
 
@@ -78,9 +80,9 @@ a diagnostic aid but is not a substitute for the project's production endpoint.
 - Build gate: WDK compiler, static analysis and INF validation pass. This does
   not prove the driver loads or connects.
 - Load gate: explicit test machine/device, recovery procedure and valid signing
-  strategy. No driver is installed by this repository today. Nonblocking lifecycle
-  source and host fault tests exist; actual provider callback retirement, kernel
-  allocation/cancel/removal and Verifier acceptance remain load blockers.
+  strategy. Only the separate synthetic lab has been guest-test-signed and loaded;
+  the production driver has not been installed on the daily-use host. Real provider
+  retirement, additional kernel faults and actual PnP/power behavior remain gates.
 - Transport gate: actual protocol trace shows LDAC configuration accepted and
   media sent to the intended sink. A UI showing "LDAC" is insufficient.
 - Playback gate: real headset audio, pause/resume and reconnect work.

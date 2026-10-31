@@ -1,7 +1,9 @@
 # Nonblocking close and cancellation
 
-Status: implemented source plus host fault-model tests. Kernel scheduling,
-provider callback behavior and real device removal are not established by them.
+Status: implemented source, host fault models, and an executed real-WDF synthetic
+provider baseline/standard Verifier run. The [2026-11-01 record](validation/KERNEL_LAB_2026-11-01.md)
+describes the cases and limits. Real BthPort callback behavior, full IRQL/race/fault
+coverage and actual device removal are not established.
 
 ## Ownership
 
@@ -74,9 +76,11 @@ completion, cancel-before-Send, remote CloseNow and target-stop races. The shim
 models API contracts, not IRQL, real concurrency or Bluetooth behavior. ASan/UBSan
 CI applies to both host targets, separately from the encoder.
 
-The current development system has no isolated kernel test environment. The
-[required kernel matrix](KERNEL_TEST_MATRIX.md) remains NOT RUN. The read-only
-collector cannot turn host or metadata evidence into a kernel acceptance result.
+The isolated VM now passed 363 synthetic-provider checks both at baseline and
+under targeted standard Verifier, followed by normal unload. Additional fault
+profiles and actual BthPort/PnP cases in the [required matrix](KERNEL_TEST_MATRIX.md)
+remain pending. The read-only collector cannot turn host or metadata evidence
+into a kernel acceptance result.
 
 Before a laptop trial, a separate kernel test environment must establish:
 

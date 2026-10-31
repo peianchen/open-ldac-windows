@@ -1,9 +1,11 @@
 # Kernel test gate and evidence collection
 
-Current state: **NOT RUN**. The development machine is a daily-use laptop; no
-separate Windows test machine or existing Windows VM is available. Nothing in
-host CI or the host WDF shim counts as Driver Verifier or BthPort acceptance.
-No production signing or Windows audio endpoint acceptance is claimed.
+Current state, 2026-11-01: an isolated Windows VM passed the real-WDF synthetic
+provider baseline and targeted standard oneboot Verifier cases on `36bc35f`,
+including controlled unload. See the [executed report](validation/KERNEL_LAB_2026-11-01.md).
+This matrix remains incomplete: additional fault profiles, actual BthPort/PnP,
+real hardware, production signing and Windows audio endpoint acceptance are pending.
+Host CI and the host WDF shim do not establish kernel or BthPort acceptance.
 
 ## Prerequisites
 
@@ -16,9 +18,11 @@ behavior without separately scoped access to the actual Bluetooth hardware.
 Before loading, record exact SYS/INF/CAT hashes, code revision and original Audio
 Sink service binding/restore procedure. A **test-signed package trusted only by the
 isolated guest** is a prerequisite for kernel tests; production distribution
-signing follows successful testing. No test certificate is installed, boot setting
-changed, or signing credential created by this project today. Signing a file does
-not make it safe to load. A signed catalog must cover the actual SYS/INF content.
+signing follows successful testing. Test certificates, test-signing and virtual
+Secure Boot changes for the executed lab exist only inside its isolated guest;
+the daily-use host was not changed. Signing a file does not make it safe to load.
+A production package's signed catalog must cover the actual SYS/INF content;
+the separate non-PnP lab service used an embedded guest test signature.
 
 ## Required runtime cases
 
