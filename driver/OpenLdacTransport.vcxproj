@@ -29,6 +29,8 @@
     <IntDir>$(ProjectDir)..\build\native-obj\</IntDir>
     <TargetName>OpenLdacTransport</TargetName>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
+    <InfToolPath>$(OlPackages)Microsoft.Windows.WDK.x64.$(OlKitVersion)\c\bin\10.0.26100.0\x64\</InfToolPath>
+    <Inf2CatToolPath>$(OlPackages)Microsoft.Windows.WDK.x64.$(OlKitVersion)\c\bin\10.0.26100.0\x86\</Inf2CatToolPath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>

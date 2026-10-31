@@ -1001,7 +1001,8 @@ Return Value:
 
 {
     NTSTATUS status;
-    struct _BRB_L2CA_OPEN_CHANNEL *brb;    
+    struct _BRB_L2CA_OPEN_CHANNEL *brb;
+    BOOLEAN disconnectRequested;
     PBTHECHOSAMPLE_CLIENT_CONTEXT DevCtx;
     PBTHECHO_CONNECTION connection;
     
@@ -1017,20 +1018,21 @@ Return Value:
     connection = (PBTHECHO_CONNECTION) brb->Hdr.ClientContext[0];
 
     //
-    // In the client we don't check for ConnectionStateDisconnecting state 
-    // because only file close generates disconnect which
-    // cannot happen before create completes. And we complete Create
-    // only after we process this completion.
+    // An explicit CONNECT IOCTL can overlap file cleanup. Preserve an earlier
+    // disconnect request and close the newly returned channel before completion.
     //
 
     if(NT_SUCCESS(status))
     {
+        WdfSpinLockAcquire(connection->ConnectionLock);
+        disconnectRequested = connection->ConnectionState == ConnectionStateDisconnecting;
         connection->OutMTU = brb->OutResults.Params.Mtu;
         connection->InMTU = brb->InResults.Params.Mtu;
         connection->ChannelHandle = brb->ChannelHandle;
         connection->RemoteAddress = brb->BtAddress;
 
         connection->ConnectionState = ConnectionStateConnected;
+        WdfSpinLockRelease(connection->ConnectionLock);
 
         TraceEvents(TRACE_LEVEL_INFORMATION, DBG_CONNECT, 
             "Connection established to server"); 
@@ -1040,6 +1042,7 @@ Return Value:
         // for any post processing after connection has been established
         //
         status = BthEchoCliConnectionStateConnected(WdfRequestGetFileObject(Request), connection);
+        if (disconnectRequested) status = STATUS_CANCELLED;
         if (!NT_SUCCESS(status))
         {
             //
@@ -1053,7 +1056,10 @@ Return Value:
     }
     else
     {
+        WdfSpinLockAcquire(connection->ConnectionLock);
         connection->ConnectionState = ConnectionStateConnectFailed;
+        WdfSpinLockRelease(connection->ConnectionLock);
+        KeSetEvent(&connection->DisconnectEvent, 0, FALSE);
     }
 
     //

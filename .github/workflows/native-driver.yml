@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
       - name: Restore pinned Microsoft driver packages
         shell: pwsh
         run: nuget restore driver/packages.config -PackagesDirectory driver/.packages -NonInteractive
