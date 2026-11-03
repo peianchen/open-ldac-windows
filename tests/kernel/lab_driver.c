@@ -134,6 +134,9 @@ static NTSTATUS CompleteOpen(_In_ BOOLEAN Fail)
     }
     WdfWaitLockRelease(PortGate);
     if (request == NULL) return status;
+    /* Both ownership paths registered this context before deferral. Read it
+     * from the now-owned request, rather than relying on correlated branches. */
+    channel = GetPortRequest(request)->Channel;
     InterlockedIncrement64(&OpenControlCompleted);
     /* Success can synchronously submit CLOSE. Never hold PortGate here. */
     WdfRequestComplete(request, Fail ? STATUS_UNSUCCESSFUL : STATUS_SUCCESS);
