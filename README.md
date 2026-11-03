@@ -8,8 +8,9 @@ and its remaining hardware/audio/power gates.
 
 - [Background, principles and research methods](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/RESEARCH_BACKGROUND.zh-TW.md)
 - [Step-by-step development tutorial](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_GUIDE.zh-TW.md)
-- [Development journal and reflections](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_JOURNAL.zh-TW.md)
+- [Development journal and reflections](https://github.com/peianchen/open-ldac-windows/blob/896a3cab7478ad5d6e76806940000c625e290f11/docs/DEVELOPMENT_JOURNAL.zh-TW.md)
 - [Executed kernel-lab and standard Verifier record](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/validation/KERNEL_LAB_2026-11-01.md)
+- [2026-11-03: deferred OPEN, standard and forced-pending Verifier](https://github.com/peianchen/open-ldac-windows/blob/896a3cab7478ad5d6e76806940000c625e290f11/docs/validation/KERNEL_LAB_2026-11-03.md)
 
 [繁體中文](README.zh-TW.md)
 
