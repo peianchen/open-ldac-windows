@@ -7,9 +7,10 @@
 
 - [研究背景、原理與實驗方法](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/RESEARCH_BACKGROUND.zh-TW.md)
 - [完整開發教學與實際除錯案例](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/DEVELOPMENT_GUIDE.zh-TW.md)
-- [開發歷程與心得](https://github.com/peianchen/open-ldac-windows/blob/896a3cab7478ad5d6e76806940000c625e290f11/docs/DEVELOPMENT_JOURNAL.zh-TW.md)
+- [開發歷程與心得](https://github.com/peianchen/open-ldac-windows/blob/ac0fe0eecb2da1e6c28d47a3e2973e01ece5228c/docs/DEVELOPMENT_JOURNAL.zh-TW.md)
 - [核心基準與標準 Verifier 實測報告](https://github.com/peianchen/open-ldac-windows/blob/611c4bc5d31a04a6a26352ef2ea198260094093c/docs/validation/KERNEL_LAB_2026-11-01.md)
 - [2026-11-03：延後連線取消、標準與強制 pending Verifier 實測](https://github.com/peianchen/open-ldac-windows/blob/896a3cab7478ad5d6e76806940000c625e290f11/docs/validation/KERNEL_LAB_2026-11-03.md)
+- [2026-11-04：低資源實測、恢復與播放協商前置開發](https://github.com/peianchen/open-ldac-windows/blob/ac0fe0eecb2da1e6c28d47a3e2973e01ece5228c/docs/validation/KERNEL_LOW_RESOURCE_2026-11-04.md)
 
 開發透過 Windows 原生藍牙堆疊播放 LDAC 的開源專案，將筆電的音質與耗電同時列為核心需求。
 
