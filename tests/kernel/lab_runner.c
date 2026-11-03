@@ -8,6 +8,8 @@
 static unsigned checks;
 static unsigned pending_cases;
 static unsigned case_kind=~0u,case_release_before=~0u;
+static unsigned file_retirement_waits;
+static int wait_files(HANDLE control,unsigned expected);
 static int roots(HANDLE control,unsigned expected);
 #define CHECK(x) do { ++checks; if (!(x)) { \
     fprintf(stderr,"FAIL kernel-lab:%d: %s (Windows error %lu, pending cases %u, kind %u, release-before %u)\n", \
@@ -17,6 +19,10 @@ static int roots(HANDLE control,unsigned expected);
 static HANDLE open_lab(void) {
     return CreateFileW(L"\\\\.\\OpenLdacKernelLab",GENERIC_READ|GENERIC_WRITE,
         FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,NULL);
+}
+static HANDLE open_stream(HANDLE control) {
+    if(!wait_files(control,1)) { SetLastError(ERROR_TIMEOUT);return INVALID_HANDLE_VALUE; }
+    return open_lab();
 }
 static DWORD ioctl(HANDLE file,DWORD code,void *input,DWORD in_size,void *output,DWORD out_size) {
     OVERLAPPED ov={0};DWORD bytes=0,error=0;
@@ -86,7 +92,7 @@ static int pending_open_case(HANDLE control,unsigned kind,unsigned release_befor
     CHECK(!diag(control,&before));CHECK(!lab_status(control,&a));
     CHECK(!command(control,OL_LAB_HOLD_OPEN,held?2:1));
     CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,1));
-    file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);
+    file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);
     port=CreateIoCompletionPort(file,NULL,17,1);CHECK(port!=NULL);
     ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(ov.hEvent!=NULL);
     ok=DeviceIoControl(file,OL_IOCTL_CONNECT,&input,sizeof(input),NULL,0,&bytes,&ov);
@@ -134,6 +140,7 @@ static int pending_open_case(HANDLE control,unsigned kind,unsigned release_befor
     } else CHECK(CloseHandle(file));
     if(!release_before)CHECK(roots(control,1));
     CHECK(!command(control,OL_LAB_RELEASE_CALLBACKS,0));CHECK(roots(control,0));
+    CHECK(wait_files(control,1)); /* IRP/root completion can precede EvtFileClose. */
     CHECK(!lab_status(control,&b));CHECK(!diag(control,&after));
     CHECK(b.open_deferred-a.open_deferred==1);
     if(kind==6)CHECK((b.open_cancelled-a.open_cancelled)+(b.open_control_completed-a.open_control_completed)==1);
@@ -153,13 +160,22 @@ static int pending_open_case(HANDLE control,unsigned kind,unsigned release_befor
     CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,0));CHECK(!command(control,OL_LAB_HOLD_OPEN,0));
     ++pending_cases;case_kind=~0u;case_release_before=~0u;return 0;
 }
+static int wait_files(HANDLE control,unsigned expected) {
+    ol_lab_status s;
+    for(unsigned i=0;i<500;++i) {
+        if(lab_status(control,&s))return 0;
+        if(s.active_files==expected)return 1;
+        ++file_retirement_waits;Sleep(10);
+    }
+    return 0;
+}
 static int roots(HANDLE control,unsigned expected) {
     ol_native_request r={sizeof(r),OL_NATIVE_ABI};ol_native_status s;
     for(unsigned i=0;i<200;++i) {
         memset(&s,0,sizeof(s));
         if(ioctl(control,OL_IOCTL_QUERY,&r,sizeof(r),&s,sizeof(s)))return 0;
         if(s.size!=sizeof(s)||s.version!=OL_NATIVE_ABI)return 0;
-        if(s.connections==expected && s.in_flight==0)return 1;
+        if(s.connections==expected && s.in_flight==0)return expected?1:wait_files(control,1);
         Sleep(10); /* Bounded user-mode evidence wait; no driver polling timer. */
     }
     return 0;
@@ -196,42 +212,52 @@ int main(int argc,char **argv) {
     HKEY key;DWORD enabled=0,type=0,n=sizeof(enabled);
     HANDLE control,file;
     ol_native_request request={sizeof(request),OL_NATIVE_ABI};ol_native_diagnostics diagnostics;
-    if(argc!=2 || strcmp(argv[1],"--isolated-guest")) {
+    if((argc!=2&&argc!=3) || strcmp(argv[1],"--isolated-guest") ||
+        (argc==3&&strcmp(argv[2],"--inspect-only"))) {
         fprintf(stderr,"VM-only synthetic-provider runner. Requires --isolated-guest and guest lab marker.\n");return 2;
     }
     if(RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\OpenLdacKernelLab",0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS)return 2;
     LONG status=RegQueryValueExW(key,L"Enabled",NULL,&type,(BYTE*)&enabled,&n);RegCloseKey(key);
     if(status!=ERROR_SUCCESS || type!=REG_DWORD || enabled!=1)return 2;
     control=open_lab();CHECK(control!=INVALID_HANDLE_VALUE);
+    if(argc==3) {
+        ol_native_status s;
+        CHECK(!ioctl(control,OL_IOCTL_QUERY,&request,sizeof(request),&s,sizeof(s)));
+        CHECK(!diag(control,&diagnostics));
+        printf("{\"inspect_only\":true,\"connections\":%u,\"in_flight\":%u,\"callback_add\":%llu,\"callback_release\":%llu}\n",
+            s.connections,s.in_flight,(unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_ADD],
+            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_RELEASE]);
+        CHECK(CloseHandle(control));return 0;
+    }
     CHECK(!command(control,OL_LAB_RESET,0));CHECK(roots(control,0));
     for(unsigned repeat=0;repeat<10;++repeat)
         for(unsigned kind=0;kind<7;++kind)
             for(unsigned before=0;before<2;++before)CHECK(!pending_open_case(control,kind,before));
     for(unsigned i=0;i<25;++i) {
-        file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);
+        file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);
         CHECK(!connect_lab(file));CHECK(!write_packet(file));CHECK(!cancel_read(file));
         CHECK(CloseHandle(file));CHECK(roots(control,0));
     }
     CHECK(!command(control,OL_LAB_FAIL_OPEN,1));
-    file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);CHECK(connect_lab(file)!=0);
+    file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);CHECK(connect_lab(file)!=0);
     CHECK(CloseHandle(file));CHECK(roots(control,0));
 
     CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,1));
     for(unsigned i=0;i<OL_MAX_CHANNELS;++i) {
-        file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);CHECK(!connect_lab(file));
+        file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);CHECK(!connect_lab(file));
         CHECK(!command(control,OL_LAB_FAIL_CLOSE,1));CHECK(CloseHandle(file));
         CHECK(roots(control,i+1));
     }
-    file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);CHECK(connect_lab(file)!=0);CHECK(CloseHandle(file));
+    file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);CHECK(connect_lab(file)!=0);CHECK(CloseHandle(file));
     CHECK(roots(control,2));CHECK(!command(control,OL_LAB_RELEASE_CALLBACKS,0));CHECK(roots(control,0));
     CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,0));
 
     for(unsigned reason=0;reason<=3;++reason) {
-        file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);CHECK(!connect_lab(file));
+        file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);CHECK(!connect_lab(file));
         CHECK(!command(control,OL_LAB_REMOTE_DISCONNECT,reason));CHECK(CloseHandle(file));
         CHECK(roots(control,0));CHECK(!command(control,OL_LAB_RESET,0));
     }
-    file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);CHECK(!connect_lab(file));
+    file=open_stream(control);CHECK(file!=INVALID_HANDLE_VALUE);CHECK(!connect_lab(file));
     CHECK(!command(control,OL_LAB_REMOVE,0));CHECK(CloseHandle(file));CHECK(roots(control,1));
     CHECK(!command(control,OL_LAB_RELEASE_CALLBACKS,0));CHECK(roots(control,0));
     CHECK(!command(control,OL_LAB_RESET,0));
@@ -241,10 +267,10 @@ int main(int argc,char **argv) {
     CHECK(diagnostics.events[OL_EVENT_CONTRACT_FAULT]==0);
     CHECK(diagnostics.events[OL_EVENT_CALLBACK_ADD]==diagnostics.events[OL_EVENT_CALLBACK_RELEASE]);
     CHECK(CloseHandle(control));
-    printf("{\"kind\":\"real_wdf_synthetic_provider_kernel_lab\",\"checks\":%u,\"pending_open_cases\":%u,"
+    printf("{\"kind\":\"real_wdf_synthetic_provider_kernel_lab\",\"checks\":%u,\"pending_open_cases\":%u,\"file_retirement_waits\":%u,"
            "\"callback_add\":%llu,\"callback_release\":%llu,\"roots_destroyed\":%llu,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false,"
-           "\"verifier_status_requires_external_evidence\":true}\n",checks,pending_cases,
+           "\"verifier_status_requires_external_evidence\":true}\n",checks,pending_cases,file_retirement_waits,
            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_ADD],
            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_RELEASE],
            (unsigned long long)diagnostics.events[OL_EVENT_ROOT_DESTROY]);

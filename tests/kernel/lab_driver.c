@@ -8,7 +8,7 @@
 #include "queue.h"
 #include "lab_control.h"
 #include <wdmsec.h>
-C_ASSERT(sizeof(ol_lab_status) == 40);
+C_ASSERT(sizeof(ol_lab_status) == 48);
 
 ULONG DebugLevel = TRACE_LEVEL_ERROR;
 ULONG DebugFlag = 0xff;
@@ -280,6 +280,7 @@ VOID LabControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength, size_t 
             RtlZeroMemory(output, sizeof(*output));
             output->size = sizeof(*output); output->version = OL_LAB_ABI;
             output->pending_open = (ol_u32)InterlockedCompareExchange(&PendingOpen, 0, 0);
+            output->active_files = (ol_u32)InterlockedCompareExchange(&GetClientDeviceContext(LabMain)->ActiveFiles, 0, 0);
             for (i = 0; i < OL_MAX_CHANNELS; ++i)
                 if (Channels[i].HeldOpen != NULL && WdfRequestIsCanceled(Channels[i].HeldOpen))
                     ++output->held_cancel_seen;

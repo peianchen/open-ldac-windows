@@ -83,6 +83,13 @@ Cancel-queue callbacks take no passive wait lock. Failures terminate the runner
 process immediately so no worker can write an expired stack frame; a failed
 held request may remain quarantined in the guest and is not an unload pass.
 
+File/root and user-handle retirement are different observations. A bounded
+user-mode wait checks the synthetic status `active_files` before reusing the
+two-file capacity; a successful `CloseHandle` or zero roots alone does not prove
+that WDF has delivered `EvtFileClose`. Wait iterations are reported explicitly.
+`--isolated-guest --inspect-only` queries root/I/O/callback state without running
+the fault matrix; it cannot establish a baseline pass.
+
 WDF references: [manual queue forwarding](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestforwardtoioqueue),
 [cancellation ownership and IRQL](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfio/nc-wdfio-evt_wdf_io_queue_io_canceled_on_queue),
 [retrieval transfers ownership](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfio/nf-wdfio-wdfioqueueretrievenextrequest).

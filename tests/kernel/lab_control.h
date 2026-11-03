@@ -16,7 +16,7 @@ typedef struct { ol_u32 size, version, command, value; } ol_lab_request;
  * COMPLETE_OPEN value=0 succeeds, value=1 fails. Pending test callbacks are
  * retained until RELEASE_CALLBACKS (or CLOSE), independently of completion. */
 typedef struct {
-    ol_u32 size, version, pending_open, held_cancel_seen;
+    ol_u32 size, version, pending_open, held_cancel_seen, active_files, reserved;
     ol_u64 open_deferred, open_cancelled, open_control_completed;
 } ol_lab_status;
 #endif
