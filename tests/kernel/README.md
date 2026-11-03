@@ -107,7 +107,42 @@ Kernel synchronization delay fuzzing is deprecated on Windows build 19042 and
 later; deterministic schedules above do not claim to replace all concurrency,
 IRQL, physical PnP or BthPort testing.
 
-## Retention
+## Low-resource campaign extension
+
+`--isolated-guest --low-resource` performs one open/connect/write/cancel-read
+scenario per driver load, admitting only enumerated Windows resource errors.
+Unexpected statuses/timeouts still fail. It issues no diagnostic IOCTL under
+permanent WDF allocation poisoning. Zero failures alone cannot pass the campaign.
+
+The lab-only `OL_KERNEL_LAB` observers record real framework method results;
+they never return injected errors. Production builds compile them out without
+evaluating their arguments. A NULL control-init allocation is recorded as the
+documented resource-failure result of that pointer API. Send(TRUE) means accepted
+submission, not success of a later completion.
+
+Use the documented driver-specific `VerifierOn=1` and
+`VerifierAllocateFailCount=n` on the isolated guest. All framework allocations
+after threshold n fail, including internal allocations. Sweep independent driver
+loads; do not assume an n identifies the same call across framework versions.
+Control opens/queries may fail too. Persisted telemetry has a per-load nonce and
+progress/final distinction; post-unload acceptance requires a matching FINAL
+record, balanced callbacks, zero roots/I/O/files/pending requests, actual unload,
+then recovery after removing the poison.
+
+Only with explicit guest lab `ResourceMode=1`, the SYNTHETIC provider treats the
+actual last EvtFileClose as its independent terminal shutdown event and retires
+its callbacks. This pre-existing nonallocating path avoids needing a poisoned
+RELEASE_CALLBACKS request. It is not production callback retirement by timeout
+or assumed successful CLOSE, and cannot establish real BthPort behavior.
+
+Systematic Driver Verifier DIF19/36 and framework allocation failures are
+different mechanisms. Report zero observed DIF injection as NOT_EXERCISED, never
+as proof that every WDF branch was tested.
+
+References: [KMDF verifier allocation failures](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/registry-values-for-debugging-kmdf-drivers),
+[Windows 11 systematic simulation](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/systematic-low-resource-simulation).
+
+## Retention and publication
 
 Use the dedicated task VM folder. Keep one clean pre-Verifier snapshot, source,
 hashes and validation results. User intends to reuse the VM with a suitable Windows

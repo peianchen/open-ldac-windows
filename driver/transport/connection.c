@@ -52,6 +52,7 @@ VOID OlConnectionDestroy(WDFOBJECT Object)
     if (c->RetainedCounted) InterlockedDecrement(&dev->RetainedConnections);
     if (c->Counted) InterlockedDecrement(&dev->Connections);
     if (c->Counted) OlRecordEvent(dev, OL_EVENT_ROOT_DESTROY);
+    OL_OBSERVE_PROGRESS();
     if (targetHeld) WdfObjectDereference(target);
     if (deviceHeld) WdfObjectDereference(device);
     if (wdmHeld) ObDereferenceObject(wdm);
@@ -77,6 +78,7 @@ NTSTATUS BthEchoConnectionObjectCreate(PBTHECHOSAMPLE_DEVICE_CONTEXT_HEADER Head
     attributes.EvtCleanupCallback = OlConnectionCleanup;
     attributes.EvtDestroyCallback = OlConnectionDestroy;
     status = WdfObjectCreate(&attributes, &object);
+    OL_OBSERVE_RESULT(OL_RES_ROOT_OBJECT, status);
     if (!NT_SUCCESS(status)) { InterlockedDecrement(&dev->Connections); return status; }
     c = GetConnectionObjectContext(object);
     c->Object = object; c->DevCtxHdr = Header; c->Counted = TRUE;
@@ -87,12 +89,15 @@ NTSTATUS BthEchoConnectionObjectCreate(PBTHECHOSAMPLE_DEVICE_CONTEXT_HEADER Head
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = object;
     status = WdfSpinLockCreate(&attributes, &c->ConnectionLock);
+    OL_OBSERVE_RESULT(OL_RES_ROOT_LOCK, status);
     if (!NT_SUCCESS(status)) goto failed;
     status = WdfRequestCreate(&attributes, Header->IoTarget, &c->CloseRequest);
+    OL_OBSERVE_RESULT(OL_RES_CLOSE_REQUEST, status);
     if (!NT_SUCCESS(status)) goto failed;
     /* Reserve close descriptor storage BEFORE opening any Bluetooth channel. */
     status = WdfMemoryCreatePreallocated(&attributes, &c->CloseBrb,
                                           sizeof(c->CloseBrb), &c->CloseMemory);
+    OL_OBSERVE_RESULT(OL_RES_CLOSE_MEMORY, status);
     if (!NT_SUCCESS(status)) goto failed;
     c->Ready = TRUE;
     *Object = object;
@@ -198,6 +203,7 @@ VOID OlConnectionClose(PBTHECHO_CONNECTION c)
         if (!begin) break;
         WDF_REQUEST_REUSE_PARAMS_INIT(&reuse, WDF_REQUEST_REUSE_NO_FLAGS, STATUS_NOT_SUPPORTED);
         status = WdfRequestReuse(c->CloseRequest, &reuse);
+        OL_OBSERVE_RESULT(OL_RES_CLOSE_REUSE, status);
         if (NT_SUCCESS(status)) {
             c->DevCtxHdr->ProfileDrvInterface.BthReuseBrb((PBRB)&c->CloseBrb, BRB_L2CA_CLOSE_CHANNEL);
             c->CloseBrb.BtAddress = c->RemoteAddress;
@@ -205,6 +211,7 @@ VOID OlConnectionClose(PBTHECHO_CONNECTION c)
             status = WdfIoTargetFormatRequestForInternalIoctlOthers(c->DevCtxHdr->IoTarget,
                 c->CloseRequest, IOCTL_INTERNAL_BTH_SUBMIT_BRB, c->CloseMemory,
                 NULL, NULL, NULL, NULL, NULL);
+            OL_OBSERVE_RESULT(OL_RES_CLOSE_FORMAT, status);
         }
         if (NT_SUCCESS(status)) {
             if (InterlockedCompareExchange(&GetClientDeviceContext(c->DevCtxHdr->Device)->Removed, 0, 0)) {
@@ -216,11 +223,13 @@ VOID OlConnectionClose(PBTHECHO_CONNECTION c)
             WdfRequestSetCompletionRoutine(c->CloseRequest, OlCloseComplete, c);
             OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_CLOSE_SEND);
             if (WdfRequestSend(c->CloseRequest, c->DevCtxHdr->IoTarget, NULL)) {
+                OL_OBSERVE_RESULT(OL_RES_CLOSE_SEND, STATUS_SUCCESS);
                 if (InterlockedCompareExchange(&GetClientDeviceContext(c->DevCtxHdr->Device)->Removed, 0, 0))
                     OlCancelRequest(GetClientDeviceContext(c->DevCtxHdr->Device), c->CloseRequest);
                 break;
             }
             status = WdfRequestGetStatus(c->CloseRequest);
+            OL_OBSERVE_RESULT(OL_RES_CLOSE_SEND, status);
         }
         UNREFERENCED_PARAMETER(status);
         OlRecordEvent(GetClientDeviceContext(c->DevCtxHdr->Device), OL_EVENT_CLOSE_FAILURE);
@@ -272,9 +281,12 @@ NTSTATUS FormatRequestWithBrb(WDFIOTARGET Target, WDFREQUEST Request, PBRB Brb, 
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = Request;
     status = WdfMemoryCreatePreallocated(&attributes, Brb, Size, &memory);
+    OL_OBSERVE_RESULT(Brb->BrbHeader.Type == BRB_L2CA_OPEN_CHANNEL ? OL_RES_OPEN_MEMORY : OL_RES_TRANSFER_MEMORY, status);
     if (!NT_SUCCESS(status)) return status;
-    return WdfIoTargetFormatRequestForInternalIoctlOthers(Target, Request,
+    status = WdfIoTargetFormatRequestForInternalIoctlOthers(Target, Request,
         IOCTL_INTERNAL_BTH_SUBMIT_BRB, memory, NULL, NULL, NULL, NULL, NULL);
+    OL_OBSERVE_RESULT(Brb->BrbHeader.Type == BRB_L2CA_OPEN_CHANNEL ? OL_RES_OPEN_FORMAT : OL_RES_TRANSFER_FORMAT, status);
+    return status;
 }
 
 NTSTATUS BthEchoConnectionObjectFormatRequestForL2CaTransfer(PBTHECHO_CONNECTION c,

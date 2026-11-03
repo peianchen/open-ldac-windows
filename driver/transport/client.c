@@ -167,6 +167,7 @@ VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request,
         else if (InterlockedCompareExchange(&GetOlRequestContext(Request)->CancelWanted, 0, 0) ||
                  InterlockedCompareExchange(&dev->Removed, 0, 0))
             OlCancelRequest(dev, Request);
+        OL_OBSERVE_RESULT(OL_RES_OPEN_SEND, status);
     }
     if (!NT_SUCCESS(status)) {
         OlRecordEvent(dev, OL_EVENT_OPEN_FAILURE);

@@ -35,6 +35,7 @@ try {
         "-I$sdkRoot/c/Include/10.0.26100.0/um",
         "-I$root/include","-I$PSScriptRoot/transport")
     $objects = @()
+    if ($KernelLab) { $flags += @('-DOL_KERNEL_LAB=1', "-I$root/tests/kernel") }
     foreach ($source in @('driver','device','client','queue','clisrv','connection','control')) {
         $object = Join-Path $out "$source.obj"
         & $zigExe @flags '-c' (Join-Path $PSScriptRoot "transport/$source.c") '-o' $object

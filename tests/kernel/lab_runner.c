@@ -217,17 +217,136 @@ static int write_packet(HANDLE file) {
     }
     CloseHandle(ov.hEvent);CHECK(!error && bytes==sizeof(packet));return 0;
 }
+typedef struct {
+    unsigned open_success,connect_success,write_success,cancelled_reads;
+    unsigned expected_resource_failures,open_resource_failures,connect_resource_failures;
+    unsigned write_resource_failures,read_resource_failures,transient_file_cap_retries;
+} resource_counts;
+
+/* This classifies user-visible resource errors, not proof that WDF injected a
+ * failure. The guest controller must independently require real per-site Wdf*
+ * failure telemetry before granting any resource-coverage acceptance. */
+static int resource_error(DWORD error) {
+    return error==ERROR_NOT_ENOUGH_MEMORY || error==ERROR_OUTOFMEMORY ||
+        error==ERROR_NO_SYSTEM_RESOURCES || error==ERROR_NOT_ENOUGH_QUOTA ||
+        error==ERROR_COMMITMENT_LIMIT;
+}
+static void resource_failure(resource_counts *counts,unsigned *operation,DWORD error) {
+    SetLastError(error);CHECK(resource_error(error));
+    ++counts->expected_resource_failures;++*operation;
+}
+static HANDLE resource_open(resource_counts *counts,DWORD *error) {
+    for(unsigned i=0;i<500;++i) {
+        HANDLE file=open_lab();
+        if(file!=INVALID_HANDLE_VALUE){*error=0;return file;}
+        *error=GetLastError();
+        if(*error!=ERROR_TOO_MANY_OPEN_FILES)return INVALID_HANDLE_VALUE;
+        ++counts->transient_file_cap_retries;Sleep(10);
+    }
+    *error=ERROR_TIMEOUT;return INVALID_HANDLE_VALUE;
+}
+static DWORD resource_await(HANDLE file,OVERLAPPED *ov,DWORD *bytes) {
+    DWORD waited=WaitForSingleObject(ov->hEvent,5000);
+    if(waited!=WAIT_OBJECT_0) {
+        DWORD error=waited==WAIT_TIMEOUT?ERROR_TIMEOUT:GetLastError();
+        (void)CancelIoEx(file,ov);
+        /* Fail the entire process instead of returning past a live stack
+         * OVERLAPPED, or treating a timeout as an expected resource error. */
+        SetLastError(error);CHECK(waited==WAIT_OBJECT_0);
+    }
+    return GetOverlappedResult(file,ov,bytes,FALSE)?0:GetLastError();
+}
+static DWORD resource_connect(HANDLE file) {
+    ol_native_request input={sizeof(input),OL_NATIVE_ABI};
+    OVERLAPPED ov={0};DWORD bytes=0,error=0;
+    ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(ov.hEvent!=NULL);
+    if(!DeviceIoControl(file,OL_IOCTL_CONNECT,&input,sizeof(input),NULL,0,&bytes,&ov)) {
+        error=GetLastError();
+        if(error==ERROR_IO_PENDING)error=resource_await(file,&ov,&bytes);
+    }
+    CHECK(CloseHandle(ov.hEvent));
+    if(!error)CHECK(bytes==0);
+    return error;
+}
+static DWORD resource_write(HANDLE file) {
+    BYTE packet[2]={0x10,1};OVERLAPPED ov={0};DWORD bytes=0,error=0;
+    ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(ov.hEvent!=NULL);
+    if(!WriteFile(file,packet,sizeof(packet),&bytes,&ov)) {
+        error=GetLastError();
+        if(error==ERROR_IO_PENDING)error=resource_await(file,&ov,&bytes);
+    }
+    CHECK(CloseHandle(ov.hEvent));
+    if(!error)CHECK(bytes==sizeof(packet));
+    return error;
+}
+static DWORD resource_read(HANDLE file,BOOL *cancelled_read) {
+    BYTE buffer[OL_MAX_PACKET];OVERLAPPED ov={0};DWORD bytes=0,error;
+    BOOL completed,cancelled;DWORD cancel_error;
+    *cancelled_read=FALSE;
+    ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(ov.hEvent!=NULL);
+    completed=ReadFile(file,buffer,sizeof(buffer),&bytes,&ov);
+    error=completed?0:GetLastError();
+    if(!completed && error==ERROR_IO_PENDING) {
+        cancelled=CancelIoEx(file,&ov);cancel_error=cancelled?0:GetLastError();
+        CHECK(cancelled || cancel_error==ERROR_NOT_FOUND);
+        error=resource_await(file,&ov,&bytes);
+        if(error==ERROR_OPERATION_ABORTED) {*cancelled_read=TRUE;error=0;}
+        else if(!error) {
+            /* Synthetic inbound transfers cannot complete successfully. */
+            SetLastError(ERROR_INVALID_DATA);CHECK(error!=0);
+        }
+    } else {
+        /* An immediate successful read is not this provider's contract. An
+         * immediate cancellation also is not evidence of our cancellation. */
+        CHECK(!completed);
+    }
+    CHECK(CloseHandle(ov.hEvent));return error;
+}
+static int low_resource_workload(void) {
+    resource_counts counts={0};DWORD error;HANDLE file;BOOL cancelled=FALSE;
+    /* One stream per driver load. The controller sweeps many independent
+     * thresholds. Do not allocate a control handle or issue diagnostics while
+     * WDF's permanent-after-N poison can also reject those allocations. */
+    file=resource_open(&counts,&error);
+    if(file==INVALID_HANDLE_VALUE)resource_failure(&counts,&counts.open_resource_failures,error);
+    else {
+        ++counts.open_success;
+        error=resource_connect(file);
+        if(error)resource_failure(&counts,&counts.connect_resource_failures,error);
+        else {
+            ++counts.connect_success;
+            error=resource_write(file);
+            if(error)resource_failure(&counts,&counts.write_resource_failures,error);
+            else ++counts.write_success;
+            error=resource_read(file,&cancelled);
+            if(error)resource_failure(&counts,&counts.read_resource_failures,error);
+            else {CHECK(cancelled);++counts.cancelled_reads;}
+        }
+        CHECK(CloseHandle(file));
+    }
+    printf("{\"kind\":\"real_wdf_low_resource_workload\",\"checks\":%u,\"iterations\":1,"
+           "\"open_success\":%u,\"connect_success\":%u,\"write_success\":%u,\"cancelled_reads\":%u,"
+           "\"expected_resource_failures\":%u,\"open_resource_failures\":%u,"
+           "\"connect_resource_failures\":%u,\"write_resource_failures\":%u,\"read_resource_failures\":%u,"
+           "\"transient_file_cap_retries\":%u,\"resource_acceptance_requires_external_telemetry\":true,"
+           "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false}\n",
+           checks,counts.open_success,counts.connect_success,counts.write_success,counts.cancelled_reads,
+           counts.expected_resource_failures,counts.open_resource_failures,counts.connect_resource_failures,
+           counts.write_resource_failures,counts.read_resource_failures,counts.transient_file_cap_retries);
+    return 0;
+}
 int main(int argc,char **argv) {
     HKEY key;DWORD enabled=0,type=0,n=sizeof(enabled);
     HANDLE control,file;
     ol_native_request request={sizeof(request),OL_NATIVE_ABI};ol_native_diagnostics diagnostics;
     if((argc!=2&&argc!=3) || strcmp(argv[1],"--isolated-guest") ||
-        (argc==3&&strcmp(argv[2],"--inspect-only"))) {
+        (argc==3&&strcmp(argv[2],"--inspect-only")&&strcmp(argv[2],"--low-resource"))) {
         fprintf(stderr,"VM-only synthetic-provider runner. Requires --isolated-guest and guest lab marker.\n");return 2;
     }
     if(RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\OpenLdacKernelLab",0,KEY_QUERY_VALUE,&key)!=ERROR_SUCCESS)return 2;
     LONG status=RegQueryValueExW(key,L"Enabled",NULL,&type,(BYTE*)&enabled,&n);RegCloseKey(key);
     if(status!=ERROR_SUCCESS || type!=REG_DWORD || enabled!=1)return 2;
+    if(argc==3&&!strcmp(argv[2],"--low-resource"))return low_resource_workload();
     control=open_lab();CHECK(control!=INVALID_HANDLE_VALUE);
     if(argc==3) {
         ol_native_status s;

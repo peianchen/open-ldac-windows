@@ -51,6 +51,7 @@ VOID BthEchoCliEvtDeviceFileCreate(WDFDEVICE Device, WDFREQUEST Request,
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = FileObject;
     status = WdfSpinLockCreate(&attributes, &file->Lock);
+    OL_OBSERVE_RESULT(OL_RES_FILE_LOCK, status);
     if (!NT_SUCCESS(status)) { WdfRequestComplete(Request, status); return; }
     if (InterlockedIncrement(&dev->ActiveFiles) > (LONG)OL_MAX_CHANNELS) {
         InterlockedDecrement(&dev->ActiveFiles);

@@ -17,6 +17,81 @@ static WDFWAITLOCK PortGate;
 static WDFQUEUE PendingOpenQueue;
 static volatile LONG FailOpen, FailClose, KeepCallbacks, HoldOpen, PendingOpen;
 static volatile LONG64 OpenDeferred, OpenCancelled, OpenControlCompleted;
+static HANDLE TelemetryKey;
+static KMUTEX TelemetryMutex;
+static BOOLEAN ResourceMode;
+static NTSTATUS StartupStatus;
+static ULONGLONG ResourceLoadId;
+typedef struct { volatile LONG Attempts, Failures, LastFailure, ResourceFailures; } LAB_RESOURCE_COUNT;
+static LAB_RESOURCE_COUNT ResourceCounts[OL_RES_SITE_COUNT];
+typedef struct {
+    ULONG Size, Version, SiteCount, StartupStatus;
+    ULONG Connections, InFlight, ActiveFiles, PendingOpen;
+    ULONG SnapshotKind, Reserved;
+    ULONGLONG LoadId;
+    ULONGLONG CallbackAdd, CallbackRelease, RootsDestroyed, ContractFaults;
+    LAB_RESOURCE_COUNT Sites[OL_RES_SITE_COUNT];
+} LAB_RESOURCE_TELEMETRY;
+C_ASSERT(sizeof(LAB_RESOURCE_TELEMETRY) == 80 + 16 * OL_RES_SITE_COUNT);
+
+_Use_decl_annotations_
+VOID OlLabObserveResource(ULONG Site, NTSTATUS Status)
+{
+    if (Site >= OL_RES_SITE_COUNT) { NT_ASSERT(FALSE); return; }
+    InterlockedIncrement(&ResourceCounts[Site].Attempts);
+    if (!NT_SUCCESS(Status)) {
+        InterlockedIncrement(&ResourceCounts[Site].Failures);
+        InterlockedExchange(&ResourceCounts[Site].LastFailure, Status);
+        if (Status == STATUS_INSUFFICIENT_RESOURCES || Status == STATUS_NO_MEMORY ||
+            Status == STATUS_QUOTA_EXCEEDED || Status == STATUS_COMMITMENT_LIMIT)
+            InterlockedIncrement(&ResourceCounts[Site].ResourceFailures);
+    }
+}
+
+/* Passive unload/failed-entry evidence path uses no WDF object allocation.
+ * The key must already exist as the explicit guest lab marker. */
+_IRQL_requires_(PASSIVE_LEVEL)
+static VOID PersistResources(_In_ BOOLEAN CloseKey)
+{
+    DECLARE_CONST_UNICODE_STRING(name, L"ResourceTelemetry");
+    LAB_RESOURCE_TELEMETRY t = {0};
+    ULONG i;
+    NTSTATUS status = KeWaitForSingleObject(&TelemetryMutex, Executive, KernelMode, FALSE, NULL);
+    if (!NT_SUCCESS(status)) return;
+    if (TelemetryKey == NULL) { KeReleaseMutex(&TelemetryMutex, FALSE); return; }
+    t.Size = sizeof(t); t.Version = 2; t.SiteCount = OL_RES_SITE_COUNT;
+    t.SnapshotKind = CloseKey ? 2u : 1u; t.LoadId = ResourceLoadId;
+    t.StartupStatus = (ULONG)StartupStatus;
+    if (LabMain != NULL) {
+        PBTHECHOSAMPLE_CLIENT_CONTEXT d = GetClientDeviceContext(LabMain);
+        t.Connections = (ULONG)InterlockedCompareExchange(&d->Connections, 0, 0);
+        t.InFlight = (ULONG)InterlockedCompareExchange(&d->InFlight, 0, 0);
+        t.ActiveFiles = (ULONG)InterlockedCompareExchange(&d->ActiveFiles, 0, 0);
+        t.CallbackAdd = (ULONGLONG)InterlockedCompareExchange64(&d->Events[OL_EVENT_CALLBACK_ADD], 0, 0);
+        t.CallbackRelease = (ULONGLONG)InterlockedCompareExchange64(&d->Events[OL_EVENT_CALLBACK_RELEASE], 0, 0);
+        t.RootsDestroyed = (ULONGLONG)InterlockedCompareExchange64(&d->Events[OL_EVENT_ROOT_DESTROY], 0, 0);
+        t.ContractFaults = (ULONGLONG)InterlockedCompareExchange64(&d->Events[OL_EVENT_CONTRACT_FAULT], 0, 0);
+    }
+    t.PendingOpen = (ULONG)InterlockedCompareExchange(&PendingOpen, 0, 0);
+    for (i = 0; i < OL_RES_SITE_COUNT; ++i) {
+        t.Sites[i].Attempts = InterlockedCompareExchange(&ResourceCounts[i].Attempts, 0, 0);
+        t.Sites[i].Failures = InterlockedCompareExchange(&ResourceCounts[i].Failures, 0, 0);
+        t.Sites[i].LastFailure = InterlockedCompareExchange(&ResourceCounts[i].LastFailure, 0, 0);
+        t.Sites[i].ResourceFailures = InterlockedCompareExchange(&ResourceCounts[i].ResourceFailures, 0, 0);
+    }
+    /* A failed final write must not reuse an earlier progress/load record.
+     * The controller requires final kind=2 AND the exact per-load nonce. */
+    status = ZwSetValueKey(TelemetryKey, (PUNICODE_STRING)&name, 0, REG_BINARY, &t, sizeof(t));
+    if (!NT_SUCCESS(status)) (void)ZwDeleteValueKey(TelemetryKey, (PUNICODE_STRING)&name);
+    if (CloseKey) { ZwClose(TelemetryKey); TelemetryKey = NULL; }
+    KeReleaseMutex(&TelemetryMutex, FALSE);
+}
+
+_Use_decl_annotations_
+VOID OlLabResourceProgress(VOID)
+{
+    if (ResourceMode && KeGetCurrentIrql() == PASSIVE_LEVEL) PersistResources(FALSE);
+}
 
 typedef struct {
     PFNBTHPORT_INDICATION_CALLBACK Callback;
@@ -244,8 +319,26 @@ VOID LabFileClose(WDFFILEOBJECT File)
     OlFileDetach(File);
     if (file->Counted) {
         file->Counted = FALSE;
-        InterlockedDecrement(&GetClientDeviceContext(WdfFileObjectGetDevice(File))->ActiveFiles);
+        LONG remaining = InterlockedDecrement(&GetClientDeviceContext(WdfFileObjectGetDevice(File))->ActiveFiles);
+        if (ResourceMode && remaining == 0) {
+            ULONG i;
+            NTSTATUS status = WdfWaitLockAcquire(PortGate, NULL);
+            if (NT_SUCCESS(status)) {
+                /* Synthetic provider's independent terminal event: no clients
+                 * remain. Never infer production callback retirement from a
+                 * timeout/failed CLOSE. Resource workload uses no held OPEN. */
+                for (i = 0; InterlockedCompareExchange(&GetClientDeviceContext(WdfFileObjectGetDevice(File))->ActiveFiles, 0, 0) == 0 && i < OL_MAX_CHANNELS; ++i) {
+                    NT_ASSERT(Channels[i].Pending == 0);
+                    if (Channels[i].Callback != NULL) {
+                        OlLabObserveResource(OL_RES_PROVIDER_FINAL_RETIREMENT, STATUS_SUCCESS);
+                        ReleaseChannel(&Channels[i]);
+                    }
+                }
+                WdfWaitLockRelease(PortGate);
+            }
+        }
     }
+    OlLabResourceProgress();
 }
 
 _Use_decl_annotations_
@@ -337,10 +430,12 @@ static NTSTATUS CreateControl(WDFDRIVER Driver, BOOLEAN Main)
     WDFDEVICE device;
     NTSTATUS status;
     init = WdfControlDeviceInitAllocate(Driver, &SDDL_DEVOBJ_SYS_ALL_ADM_ALL);
+    OL_OBSERVE_RESULT(OL_RES_INIT_ALLOC, init != NULL ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES);
     if (init == NULL) return STATUS_INSUFFICIENT_RESOURCES;
     WdfDeviceInitSetDeviceType(init, OL_DEVICE_TYPE);
     WdfDeviceInitSetIoType(init, WdfDeviceIoBuffered);
     status = WdfDeviceInitAssignName(init, Main ? &mainName : &portName);
+    OL_OBSERVE_RESULT(OL_RES_INIT_NAME, status);
     if (!NT_SUCCESS(status)) { WdfDeviceInitFree(init); return status; }
     WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
     attrs.SynchronizationScope = WdfSynchronizationScopeNone;
@@ -361,6 +456,7 @@ static NTSTATUS CreateControl(WDFDRIVER Driver, BOOLEAN Main)
     }
     WdfDeviceInitSetRequestAttributes(init, &requests);
     status = WdfDeviceCreate(&init, &attrs, &device);
+    OL_OBSERVE_RESULT(OL_RES_INIT_DEVICE, status);
     if (!NT_SUCCESS(status)) { if (init != NULL) WdfDeviceInitFree(init); return status; }
     if (Main) LabMain = device; else LabPort = device;
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
@@ -375,12 +471,14 @@ static NTSTATUS CreateControl(WDFDRIVER Driver, BOOLEAN Main)
     attrs.ExecutionLevel = WdfExecutionLevelPassive;
     attrs.SynchronizationScope = WdfSynchronizationScopeNone;
     status = WdfIoQueueCreate(device, &queueConfig, &attrs, WDF_NO_HANDLE);
+    OL_OBSERVE_RESULT(OL_RES_INIT_QUEUE, status);
     if (!NT_SUCCESS(status)) return status;
     if (!Main) {
         WDF_IO_QUEUE_CONFIG_INIT(&queueConfig, WdfIoQueueDispatchManual);
         queueConfig.PowerManaged = WdfFalse;
         queueConfig.EvtIoCanceledOnQueue = LabCancelOpen;
         status = WdfIoQueueCreate(device, &queueConfig, &attrs, &PendingOpenQueue);
+        OL_OBSERVE_RESULT(OL_RES_INIT_QUEUE, status);
         if (!NT_SUCCESS(status)) return status;
     }
     if (Main) {
@@ -390,12 +488,15 @@ static NTSTATUS CreateControl(WDFDRIVER Driver, BOOLEAN Main)
         dev->Header.ProfileDrvInterface.BthReuseBrb = LabReuseBrb;
         WDF_OBJECT_ATTRIBUTES_INIT(&attrs); attrs.ParentObject = device;
         status = WdfIoTargetCreate(device, &attrs, &dev->Header.IoTarget);
+        OL_OBSERVE_RESULT(OL_RES_INIT_TARGET, status);
         if (!NT_SUCCESS(status)) return status;
         WDF_IO_TARGET_OPEN_PARAMS_INIT_EXISTING_DEVICE(&open, WdfDeviceWdmGetDeviceObject(LabPort));
         status = WdfIoTargetOpen(dev->Header.IoTarget, &open);
+        OL_OBSERVE_RESULT(OL_RES_INIT_TARGET_OPEN, status);
         if (!NT_SUCCESS(status)) return status;
         WdfDeviceWdmGetDeviceObject(device)->StackSize = WdfDeviceWdmGetDeviceObject(LabPort)->StackSize + 1;
         status = WdfDeviceCreateSymbolicLink(device, &link);
+        OL_OBSERVE_RESULT(OL_RES_INIT_LINK, status);
         if (!NT_SUCCESS(status)) return status;
     }
     WdfControlFinishInitializing(device);
@@ -406,6 +507,7 @@ _Use_decl_annotations_
 VOID LabUnload(WDFDRIVER Driver)
 {
     UNREFERENCED_PARAMETER(Driver);
+    PersistResources(TRUE);
     if (LabMain != NULL) {
         NT_ASSERT(GetClientDeviceContext(LabMain)->Connections == 0);
         WdfObjectDelete(LabMain); LabMain = NULL;
@@ -420,16 +522,40 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
     WDFDRIVER driver;
     WDF_OBJECT_ATTRIBUTES attrs;
     NTSTATUS status;
+    DECLARE_CONST_UNICODE_STRING(keyPath, L"\\Registry\\Machine\\SOFTWARE\\OpenLdacKernelLab");
+    DECLARE_CONST_UNICODE_STRING(modeName, L"ResourceMode");
+    DECLARE_CONST_UNICODE_STRING(loadName, L"ResourceLoadId");
+    OBJECT_ATTRIBUTES keyAttributes;
+    UCHAR modeData[sizeof(KEY_VALUE_PARTIAL_INFORMATION) + sizeof(ULONGLONG)];
+    PKEY_VALUE_PARTIAL_INFORMATION modeInfo = (PKEY_VALUE_PARTIAL_INFORMATION)modeData;
+    ULONG length, mode = 0;
+    KeInitializeMutex(&TelemetryMutex, 0);
     if (!LabEnabled()) return STATUS_ACCESS_DENIED;
+    InitializeObjectAttributes(&keyAttributes, (PUNICODE_STRING)&keyPath,
+        OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
+    status = ZwOpenKey(&TelemetryKey, KEY_SET_VALUE | KEY_QUERY_VALUE, &keyAttributes);
+    if (!NT_SUCCESS(status)) return status;
+    status = ZwQueryValueKey(TelemetryKey, (PUNICODE_STRING)&modeName,
+        KeyValuePartialInformation, modeData, sizeof(modeData), &length);
+    if (NT_SUCCESS(status) && modeInfo->Type == REG_DWORD && modeInfo->DataLength == sizeof(mode))
+        RtlCopyMemory(&mode, modeInfo->Data, sizeof(mode));
+    ResourceMode = mode == 1;
+    status = ZwQueryValueKey(TelemetryKey, (PUNICODE_STRING)&loadName,
+        KeyValuePartialInformation, modeData, sizeof(modeData), &length);
+    if (NT_SUCCESS(status) && modeInfo->Type == REG_QWORD && modeInfo->DataLength == sizeof(ResourceLoadId))
+        RtlCopyMemory(&ResourceLoadId, modeInfo->Data, sizeof(ResourceLoadId));
     WDF_DRIVER_CONFIG_INIT(&config, WDF_NO_EVENT_CALLBACK);
     config.DriverInitFlags = WdfDriverInitNonPnpDriver;
     config.EvtDriverUnload = LabUnload;
     status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, &driver);
-    if (!NT_SUCCESS(status)) return status;
+    OL_OBSERVE_RESULT(OL_RES_DRIVER_CREATE, status);
+    if (!NT_SUCCESS(status)) { StartupStatus = status; PersistResources(TRUE); return status; }
     WDF_OBJECT_ATTRIBUTES_INIT(&attrs); attrs.ParentObject = driver;
     status = WdfWaitLockCreate(&attrs, &PortGate);
+    OL_OBSERVE_RESULT(OL_RES_INIT_LOCK, status);
     if (NT_SUCCESS(status)) status = CreateControl(driver, FALSE);
     if (NT_SUCCESS(status)) status = CreateControl(driver, TRUE);
+    StartupStatus = status;
     if (!NT_SUCCESS(status)) LabUnload(driver);
     return status;
 }

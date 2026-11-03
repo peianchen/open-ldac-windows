@@ -48,8 +48,10 @@ static VOID Transfer(WDFREQUEST Request, size_t Length, ULONG Direction)
     }
     WdfRequestSetCompletionRoutine(Request, BthEchoCliReadWriteCompletion, brb);
     if (!WdfRequestSend(Request, c->DevCtxHdr->IoTarget, NULL)) {
-        status = WdfRequestGetStatus(Request); goto failed;
+        status = WdfRequestGetStatus(Request);
+        OL_OBSERVE_RESULT(OL_RES_TRANSFER_SEND, status); goto failed;
     }
+    OL_OBSERVE_RESULT(OL_RES_TRANSFER_SEND, STATUS_SUCCESS);
     /* Cleanup can race the check above while the request was not sent yet. */
     if (InterlockedCompareExchange(&context->CancelWanted, 0, 0) ||
         InterlockedCompareExchange(&dev->Removed, 0, 0))

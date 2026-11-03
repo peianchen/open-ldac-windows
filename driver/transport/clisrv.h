@@ -50,6 +50,14 @@ Environment:
 #include "public.h"
 #endif
 
+#ifdef OL_KERNEL_LAB
+#include "lab_observer.h"
+#else
+/* No observation calls or evaluated arguments in production/host builds. */
+#define OL_OBSERVE_RESULT(Site, Status) ((void)0)
+#define OL_OBSERVE_PROGRESS() ((void)0)
+#endif
+
 #define POOLTAG_BTHECHOSAMPLE 'htbw'
 
 
