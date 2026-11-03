@@ -6,8 +6,13 @@
 #include "lab_control.h"
 
 static unsigned checks;
+static unsigned pending_cases;
+static unsigned case_kind=~0u,case_release_before=~0u;
+static int roots(HANDLE control,unsigned expected);
 #define CHECK(x) do { ++checks; if (!(x)) { \
-    fprintf(stderr,"FAIL kernel-lab:%d: %s (Windows error %lu)\n",__LINE__,#x,GetLastError()); return 1; } } while(0)
+    fprintf(stderr,"FAIL kernel-lab:%d: %s (Windows error %lu, pending cases %u, kind %u, release-before %u)\n", \
+        __LINE__,#x,GetLastError(),pending_cases,case_kind,case_release_before); \
+    fflush(stderr); ExitProcess(1); } } while(0)
 
 static HANDLE open_lab(void) {
     return CreateFileW(L"\\\\.\\OpenLdacKernelLab",GENERIC_READ|GENERIC_WRITE,
@@ -36,6 +41,117 @@ static DWORD command(HANDLE file,unsigned cmd,unsigned value) {
 static DWORD connect_lab(HANDLE file) {
     ol_native_request r={sizeof(r),OL_NATIVE_ABI};
     return ioctl(file,OL_IOCTL_CONNECT,&r,sizeof(r),NULL,0);
+}
+static DWORD lab_status(HANDLE control,ol_lab_status *s) {
+    ol_lab_request r={sizeof(r),OL_LAB_ABI,OL_LAB_QUERY,0};
+    memset(s,0,sizeof(*s));
+    return ioctl(control,OL_LAB_IOCTL,&r,sizeof(r),s,sizeof(*s));
+}
+static DWORD diag(HANDLE control,ol_native_diagnostics *d) {
+    ol_native_request r={sizeof(r),OL_NATIVE_ABI};
+    memset(d,0,sizeof(*d));
+    return ioctl(control,OL_IOCTL_DIAGNOSTICS,&r,sizeof(r),d,sizeof(*d));
+}
+static int wait_open(HANDLE control,unsigned pending,unsigned cancelled) {
+    ol_lab_status s;
+    for(unsigned i=0;i<500;++i) {
+        if(lab_status(control,&s)||s.size!=sizeof(s)||s.version!=OL_LAB_ABI)return 0;
+        if(s.pending_open==pending && s.held_cancel_seen==cancelled)return 1;
+        Sleep(10);
+    }
+    return 0;
+}
+typedef struct { HANDLE file; BOOL closed; DWORD error; } close_args;
+typedef struct { HANDLE file,gate; OVERLAPPED *ov; BOOL cancelled; DWORD error; } cancel_args;
+static DWORD WINAPI cancel_file_thread(void *opaque) {
+    cancel_args *a=(cancel_args*)opaque;
+    if(WaitForSingleObject(a->gate,5000)!=WAIT_OBJECT_0) { a->error=ERROR_TIMEOUT;return 0; }
+    a->cancelled=CancelIoEx(a->file,a->ov);a->error=a->cancelled?0:GetLastError();return 0;
+}
+static DWORD WINAPI close_file_thread(void *opaque) {
+    close_args *a=(close_args*)opaque;
+    a->closed=CloseHandle(a->file);a->error=a->closed?0:GetLastError();return 0;
+}
+/* Use IOCP so the completion can be collected even after file cleanup/close.
+ * The OVERLAPPED and input remain alive until the actual completion packet.
+ * Hold=2 intentionally refuses immediate cancellation, then completes under
+ * user control to exercise the production late-OPEN-success CLOSE path. */
+static int pending_open_case(HANDLE control,unsigned kind,unsigned release_before) {
+    HANDLE file,port,thread=NULL;DWORD bytes=0,error=0;ULONG_PTR key=0;OVERLAPPED *done=NULL,ov={0};
+    ol_native_request input={sizeof(input),OL_NATIVE_ABI};
+    ol_native_diagnostics before,after;ol_lab_status a,b;
+    close_args closing={0};cancel_args racing={0};BOOL ok;
+    unsigned held=kind>=2&&kind<=5,close_file=(kind==3||kind==5),fail=(kind==4||kind==5);
+    case_kind=kind;case_release_before=release_before;
+    CHECK(!diag(control,&before));CHECK(!lab_status(control,&a));
+    CHECK(!command(control,OL_LAB_HOLD_OPEN,held?2:1));
+    CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,1));
+    file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);
+    port=CreateIoCompletionPort(file,NULL,17,1);CHECK(port!=NULL);
+    ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(ov.hEvent!=NULL);
+    ok=DeviceIoControl(file,OL_IOCTL_CONNECT,&input,sizeof(input),NULL,0,&bytes,&ov);
+    error=ok?0:GetLastError();CHECK(!ok && error==ERROR_IO_PENDING);
+    CHECK(wait_open(control,1,0));CHECK(WaitForSingleObject(ov.hEvent,0)==WAIT_TIMEOUT);
+    CHECK(roots(control,1));
+    if(release_before)CHECK(!command(control,OL_LAB_RELEASE_CALLBACKS,0));
+    if(close_file) {
+        closing.file=file;
+        thread=CreateThread(NULL,0,close_file_thread,&closing,0,NULL);CHECK(thread!=NULL);
+        CHECK(wait_open(control,1,1));
+    } else if(kind==6) {
+        racing.file=file;racing.ov=&ov;racing.gate=CreateEventW(NULL,TRUE,FALSE,NULL);CHECK(racing.gate!=NULL);
+        thread=CreateThread(NULL,0,cancel_file_thread,&racing,0,NULL);CHECK(thread!=NULL);
+        CHECK(SetEvent(racing.gate)); /* Race retrieval against real user cancellation. */
+    } else if(kind!=1) {
+        CHECK(CancelIoEx(file,&ov));
+        if(held)CHECK(wait_open(control,1,1));
+    }
+    if(held) {
+        /* Cancellation does not imply completion or buffer/root retirement. */
+        CHECK(WaitForSingleObject(ov.hEvent,0)==WAIT_TIMEOUT);CHECK(roots(control,1));
+    }
+    if(kind!=0) {
+        DWORD completion=command(control,OL_LAB_COMPLETE_OPEN,fail?1:0);
+        CHECK(!completion || (kind==6 && completion==ERROR_NO_MORE_ITEMS));
+    }
+    ok=GetQueuedCompletionStatus(port,&bytes,&key,&done,5000);error=ok?0:GetLastError();
+    CHECK(done==&ov && key==17 && bytes==0);
+    if(kind==6)CHECK((ok&&!error)||(!ok&&error==ERROR_OPERATION_ABORTED));
+    else if(kind==1)CHECK(ok && !error);
+    else if(fail)CHECK(!ok && error==ERROR_GEN_FAILURE);
+    else CHECK(!ok && error==ERROR_OPERATION_ABORTED);
+    CHECK(wait_open(control,0,0));
+    /* No second packet is permitted for this one request. */
+    done=NULL;ok=GetQueuedCompletionStatus(port,&bytes,&key,&done,0);
+    CHECK(!ok && GetLastError()==WAIT_TIMEOUT && done==NULL);
+    if(kind==6) {
+        CHECK(WaitForSingleObject(thread,5000)==WAIT_OBJECT_0);
+        CHECK(racing.cancelled || racing.error==ERROR_NOT_FOUND);
+        CHECK(CloseHandle(thread));CHECK(CloseHandle(racing.gate));CHECK(CloseHandle(file));
+    } else if(close_file) {
+        CHECK(WaitForSingleObject(thread,5000)==WAIT_OBJECT_0);CHECK(closing.closed && !closing.error);
+        CHECK(CloseHandle(thread));
+    } else CHECK(CloseHandle(file));
+    if(!release_before)CHECK(roots(control,1));
+    CHECK(!command(control,OL_LAB_RELEASE_CALLBACKS,0));CHECK(roots(control,0));
+    CHECK(!lab_status(control,&b));CHECK(!diag(control,&after));
+    CHECK(b.open_deferred-a.open_deferred==1);
+    if(kind==6)CHECK((b.open_cancelled-a.open_cancelled)+(b.open_control_completed-a.open_control_completed)==1);
+    else {
+        CHECK(b.open_cancelled-a.open_cancelled==(kind==0?1u:0u));
+        CHECK(b.open_control_completed-a.open_control_completed==(kind==0?0u:1u));
+    }
+    CHECK(after.events[OL_EVENT_OPEN_SEND]-before.events[OL_EVENT_OPEN_SEND]==1);
+    CHECK(after.events[OL_EVENT_OPEN_COMPLETE]-before.events[OL_EVENT_OPEN_COMPLETE]==1);
+    CHECK(after.events[OL_EVENT_CALLBACK_ADD]-before.events[OL_EVENT_CALLBACK_ADD]==1);
+    CHECK(after.events[OL_EVENT_CALLBACK_RELEASE]-before.events[OL_EVENT_CALLBACK_RELEASE]==1);
+    CHECK(after.events[OL_EVENT_ROOT_DESTROY]-before.events[OL_EVENT_ROOT_DESTROY]==1);
+    CHECK(after.events[OL_EVENT_CLOSE_SEND]-before.events[OL_EVENT_CLOSE_SEND]==((!fail&&!release_before)?(b.open_control_completed-a.open_control_completed):0));
+    CHECK(after.events[OL_EVENT_CLOSE_COMPLETE]-before.events[OL_EVENT_CLOSE_COMPLETE]==((!fail&&!release_before)?(b.open_control_completed-a.open_control_completed):0));
+    CHECK(after.events[OL_EVENT_CONTRACT_FAULT]==before.events[OL_EVENT_CONTRACT_FAULT]);
+    CHECK(CloseHandle(ov.hEvent));CHECK(CloseHandle(port));
+    CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,0));CHECK(!command(control,OL_LAB_HOLD_OPEN,0));
+    ++pending_cases;case_kind=~0u;case_release_before=~0u;return 0;
 }
 static int roots(HANDLE control,unsigned expected) {
     ol_native_request r={sizeof(r),OL_NATIVE_ABI};ol_native_status s;
@@ -88,6 +204,9 @@ int main(int argc,char **argv) {
     if(status!=ERROR_SUCCESS || type!=REG_DWORD || enabled!=1)return 2;
     control=open_lab();CHECK(control!=INVALID_HANDLE_VALUE);
     CHECK(!command(control,OL_LAB_RESET,0));CHECK(roots(control,0));
+    for(unsigned repeat=0;repeat<10;++repeat)
+        for(unsigned kind=0;kind<7;++kind)
+            for(unsigned before=0;before<2;++before)CHECK(!pending_open_case(control,kind,before));
     for(unsigned i=0;i<25;++i) {
         file=open_lab();CHECK(file!=INVALID_HANDLE_VALUE);
         CHECK(!connect_lab(file));CHECK(!write_packet(file));CHECK(!cancel_read(file));
@@ -122,10 +241,10 @@ int main(int argc,char **argv) {
     CHECK(diagnostics.events[OL_EVENT_CONTRACT_FAULT]==0);
     CHECK(diagnostics.events[OL_EVENT_CALLBACK_ADD]==diagnostics.events[OL_EVENT_CALLBACK_RELEASE]);
     CHECK(CloseHandle(control));
-    printf("{\"kind\":\"real_wdf_synthetic_provider_kernel_lab\",\"checks\":%u,"
+    printf("{\"kind\":\"real_wdf_synthetic_provider_kernel_lab\",\"checks\":%u,\"pending_open_cases\":%u,"
            "\"callback_add\":%llu,\"callback_release\":%llu,\"roots_destroyed\":%llu,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false,"
-           "\"verifier_status_requires_external_evidence\":true}\n",checks,
+           "\"verifier_status_requires_external_evidence\":true}\n",checks,pending_cases,
            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_ADD],
            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_RELEASE],
            (unsigned long long)diagnostics.events[OL_EVENT_ROOT_DESTROY]);

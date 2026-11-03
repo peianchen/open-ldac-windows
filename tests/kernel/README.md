@@ -58,6 +58,42 @@ reason and target-stop/removal. Verifier/low-resource/forced-pending/delay scena
 require their own executed evidence. Successful runner output alone does not show
 Verifier was active. A crash is a failed test to diagnose, not an acceptable pass.
 
+## Deferred OPEN extension (ABI 2, 2026-11-03)
+
+The new runner adds 140 controlled cases: seven schedules, callback retirement
+before/after completion, repeated ten times. These are test definitions; a build
+or earlier ABI-1 pass does not establish their runtime results.
+
+| Schedule | Lower provider ownership | Expected completion |
+|---|---|---|
+| Cancel queued OPEN | WDF manual queue, cancel callback owns retirement | Cancelled once |
+| Complete queued OPEN | Retrieved once from manual queue | Success once |
+| Cancel, then late success | Driver retains OPEN until control command | Cancelled; CLOSE if provider not retired |
+| File cleanup, then late success | Driver retains OPEN; separate thread closes file | Same, with cleanup observed before completion |
+| Cancel, then failure | Driver retains OPEN | Failure once; no CLOSE |
+| File cleanup, then failure | Driver retains OPEN | Failure once; no CLOSE |
+| Cancel versus retrieve race | Worker cancels while control retrieves manual queue | Either winner, one completion |
+
+Every case observes the pending state, keeps its input/OVERLAPPED alive through
+an IOCP completion packet (also after file close), checks no duplicate packet,
+and compares per-case OPEN/CLOSE, callback and root counters. A held cancelled
+OPEN must remain incomplete with its root alive until the completion command.
+Provider retirement before completion suppresses further CLOSE submission.
+Cancel-queue callbacks take no passive wait lock. Failures terminate the runner
+process immediately so no worker can write an expired stack frame; a failed
+held request may remain quarantined in the guest and is not an unload pass.
+
+WDF references: [manual queue forwarding](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestforwardtoioqueue),
+[cancellation ownership and IRQL](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfio/nc-wdfio-evt_wdf_io_queue_io_canceled_on_queue),
+[retrieval transfers ownership](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfio/nf-wdfio-wdfioqueueretrievenextrequest).
+
+Run standard and force-pending Verifier as distinct selected-driver profiles;
+retain actual runtime evidence for each. Resource-failure testing additionally
+needs an expected-failure-aware runner and evidence that failures were injected.
+Kernel synchronization delay fuzzing is deprecated on Windows build 19042 and
+later; deterministic schedules above do not claim to replace all concurrency,
+IRQL, physical PnP or BthPort testing.
+
 ## Retention
 
 Use the dedicated task VM folder. Keep one clean pre-Verifier snapshot, source,

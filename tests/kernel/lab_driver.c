@@ -8,18 +8,22 @@
 #include "queue.h"
 #include "lab_control.h"
 #include <wdmsec.h>
+C_ASSERT(sizeof(ol_lab_status) == 40);
 
 ULONG DebugLevel = TRACE_LEVEL_ERROR;
 ULONG DebugFlag = 0xff;
 static WDFDEVICE LabMain, LabPort;
 static WDFWAITLOCK PortGate;
-static volatile LONG FailOpen, FailClose, KeepCallbacks;
+static WDFQUEUE PendingOpenQueue;
+static volatile LONG FailOpen, FailClose, KeepCallbacks, HoldOpen, PendingOpen;
+static volatile LONG64 OpenDeferred, OpenCancelled, OpenControlCompleted;
 
 typedef struct {
     PFNBTHPORT_INDICATION_CALLBACK Callback;
     PVOID Context;
     PDEVICE_OBJECT Reference;
     volatile LONG Pending;
+    WDFREQUEST HeldOpen; /* PortGate; uncompleted driver-owned request. */
 } LAB_CHANNEL;
 static LAB_CHANNEL Channels[OL_MAX_CHANNELS];
 typedef struct { LAB_CHANNEL *Channel; } LAB_PORT_REQUEST;
@@ -30,6 +34,7 @@ EVT_WDF_DRIVER_UNLOAD LabUnload;
 EVT_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL LabPortIo;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL LabControl;
 EVT_WDF_REQUEST_CANCEL LabCancelRead;
+EVT_WDF_IO_QUEUE_IO_CANCELED_ON_QUEUE LabCancelOpen;
 EVT_WDF_FILE_CLOSE LabFileClose;
 
 static BOOLEAN LabEnabled(VOID)
@@ -94,6 +99,49 @@ VOID LabCancelRead(WDFREQUEST Request)
     WdfRequestComplete(Request, STATUS_CANCELLED);
 }
 
+/* No wait lock in cancellation: this callback may run at DISPATCH_LEVEL.
+ * The provider callback reference is deliberately retained independently.
+ * Pending keeps the static channel slot unavailable through completion. */
+_Use_decl_annotations_
+VOID LabCancelOpen(WDFQUEUE Queue, WDFREQUEST Request)
+{
+    LAB_CHANNEL *channel = GetPortRequest(Request)->Channel;
+    UNREFERENCED_PARAMETER(Queue);
+    InterlockedIncrement64(&OpenCancelled);
+    WdfRequestComplete(Request, STATUS_CANCELLED);
+    InterlockedDecrement(&channel->Pending);
+    InterlockedDecrement(&PendingOpen);
+}
+
+static NTSTATUS CompleteOpen(_In_ BOOLEAN Fail)
+{
+    WDFREQUEST request = NULL;
+    LAB_CHANNEL *channel = NULL;
+    NTSTATUS status;
+    ULONG i;
+    status = WdfWaitLockAcquire(PortGate, NULL);
+    if (!NT_SUCCESS(status)) return status;
+    for (i = 0; i < OL_MAX_CHANNELS; ++i) {
+        if (Channels[i].HeldOpen != NULL) {
+            channel = &Channels[i]; request = channel->HeldOpen;
+            channel->HeldOpen = NULL;
+            break;
+        }
+    }
+    if (request == NULL) {
+        status = WdfIoQueueRetrieveNextRequest(PendingOpenQueue, &request);
+        if (NT_SUCCESS(status)) channel = GetPortRequest(request)->Channel;
+    }
+    WdfWaitLockRelease(PortGate);
+    if (request == NULL) return status;
+    InterlockedIncrement64(&OpenControlCompleted);
+    /* Success can synchronously submit CLOSE. Never hold PortGate here. */
+    WdfRequestComplete(request, Fail ? STATUS_UNSUCCESSFUL : STATUS_SUCCESS);
+    InterlockedDecrement(&channel->Pending);
+    InterlockedDecrement(&PendingOpen);
+    return STATUS_SUCCESS;
+}
+
 _Use_decl_annotations_
 VOID LabPortIo(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
                size_t InputLength, ULONG Code)
@@ -125,6 +173,25 @@ VOID LabPortIo(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
         channel->Callback(channel->Context, IndicationAddReference, &parameters);
         open->ChannelHandle = (L2CAP_CHANNEL_HANDLE)(ULONG_PTR)(i + 1);
         open->OutResults.Params.Mtu = OL_MAX_PACKET; open->InResults.Params.Mtu = OL_MAX_PACKET;
+        if (HoldOpen) {
+            GetPortRequest(Request)->Channel = channel;
+            InterlockedIncrement(&channel->Pending);
+            InterlockedIncrement(&PendingOpen);
+            InterlockedIncrement64(&OpenDeferred);
+            if (HoldOpen == 2) {
+                channel->HeldOpen = Request;
+                WdfWaitLockRelease(PortGate);
+                return; /* Explicit completion retains ownership, even on cancel. */
+            }
+            status = WdfRequestForwardToIoQueue(Request, PendingOpenQueue);
+            WdfWaitLockRelease(PortGate);
+            if (!NT_SUCCESS(status)) {
+                WdfRequestComplete(Request, status);
+                InterlockedDecrement(&channel->Pending);
+                InterlockedDecrement(&PendingOpen);
+            }
+            return; /* Framework queue or LabCancelOpen owns the request. */
+        }
         status = InterlockedExchange(&FailOpen, 0) ? STATUS_UNSUCCESSFUL : STATUS_SUCCESS;
         if (!NT_SUCCESS(status) && !KeepCallbacks) ReleaseChannel(channel);
         WdfWaitLockRelease(PortGate);
@@ -192,9 +259,35 @@ VOID LabControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength, size_t 
     if (InputLength != sizeof(*input) || input->size != sizeof(*input) || input->version != OL_LAB_ABI) {
         WdfRequestComplete(Request, STATUS_INVALID_PARAMETER); return;
     }
+    if (input->command == OL_LAB_COMPLETE_OPEN) {
+        status = input->value > 1 ? STATUS_INVALID_PARAMETER : CompleteOpen(input->value != 0);
+        WdfRequestComplete(Request, status); return;
+    }
     status = WdfWaitLockAcquire(PortGate, NULL);
     if (!NT_SUCCESS(status)) { WdfRequestComplete(Request, status); return; }
     switch (input->command) {
+    case OL_LAB_HOLD_OPEN:
+        if (input->value > 2 || PendingOpen) status = STATUS_INVALID_DEVICE_STATE;
+        else InterlockedExchange(&HoldOpen, (LONG)input->value);
+        break;
+    case OL_LAB_QUERY: {
+        ol_lab_status *output;
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID *)&output, NULL);
+        if (NT_SUCCESS(status)) {
+            RtlZeroMemory(output, sizeof(*output));
+            output->size = sizeof(*output); output->version = OL_LAB_ABI;
+            output->pending_open = (ol_u32)InterlockedCompareExchange(&PendingOpen, 0, 0);
+            for (i = 0; i < OL_MAX_CHANNELS; ++i)
+                if (Channels[i].HeldOpen != NULL && WdfRequestIsCanceled(Channels[i].HeldOpen))
+                    ++output->held_cancel_seen;
+            output->open_deferred = (ol_u64)InterlockedCompareExchange64(&OpenDeferred, 0, 0);
+            output->open_cancelled = (ol_u64)InterlockedCompareExchange64(&OpenCancelled, 0, 0);
+            output->open_control_completed = (ol_u64)InterlockedCompareExchange64(&OpenControlCompleted, 0, 0);
+            WdfWaitLockRelease(PortGate);
+            WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, sizeof(*output)); return;
+        }
+        break;
+    }
     case OL_LAB_FAIL_OPEN: InterlockedExchange(&FailOpen, input->value ? 1 : 0); break;
     case OL_LAB_FAIL_CLOSE: InterlockedExchange(&FailClose, input->value ? 1 : 0); break;
     case OL_LAB_KEEP_CALLBACKS: InterlockedExchange(&KeepCallbacks, input->value ? 1 : 0); break;
@@ -219,6 +312,7 @@ VOID LabControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength, size_t 
             status = WdfIoTargetStart(GetClientDeviceContext(LabMain)->Header.IoTarget);
             if (NT_SUCCESS(status)) InterlockedExchange(&GetClientDeviceContext(LabMain)->Removed, 0);
             InterlockedExchange(&FailOpen, 0); InterlockedExchange(&FailClose, 0); InterlockedExchange(&KeepCallbacks, 0);
+            InterlockedExchange(&HoldOpen, 0);
         }
         break;
     default: status = STATUS_INVALID_DEVICE_REQUEST; break;
@@ -278,6 +372,13 @@ static NTSTATUS CreateControl(WDFDRIVER Driver, BOOLEAN Main)
     attrs.SynchronizationScope = WdfSynchronizationScopeNone;
     status = WdfIoQueueCreate(device, &queueConfig, &attrs, WDF_NO_HANDLE);
     if (!NT_SUCCESS(status)) return status;
+    if (!Main) {
+        WDF_IO_QUEUE_CONFIG_INIT(&queueConfig, WdfIoQueueDispatchManual);
+        queueConfig.PowerManaged = WdfFalse;
+        queueConfig.EvtIoCanceledOnQueue = LabCancelOpen;
+        status = WdfIoQueueCreate(device, &queueConfig, &attrs, &PendingOpenQueue);
+        if (!NT_SUCCESS(status)) return status;
+    }
     if (Main) {
         PBTHECHOSAMPLE_CLIENT_CONTEXT dev = GetClientDeviceContext(device);
         WDF_IO_TARGET_OPEN_PARAMS open;
