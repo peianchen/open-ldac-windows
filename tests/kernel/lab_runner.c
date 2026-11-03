@@ -9,6 +9,7 @@ static unsigned checks;
 static unsigned pending_cases;
 static unsigned case_kind=~0u,case_release_before=~0u;
 static unsigned file_retirement_waits;
+static ULONGLONG file_retirement_max_ms;
 static int wait_files(HANDLE control,unsigned expected);
 static int roots(HANDLE control,unsigned expected);
 #define CHECK(x) do { ++checks; if (!(x)) { \
@@ -50,8 +51,11 @@ static DWORD connect_lab(HANDLE file) {
 }
 static DWORD lab_status(HANDLE control,ol_lab_status *s) {
     ol_lab_request r={sizeof(r),OL_LAB_ABI,OL_LAB_QUERY,0};
+    DWORD error;
     memset(s,0,sizeof(*s));
-    return ioctl(control,OL_LAB_IOCTL,&r,sizeof(r),s,sizeof(*s));
+    error=ioctl(control,OL_LAB_IOCTL,&r,sizeof(r),s,sizeof(*s));
+    if(!error && (s->size!=sizeof(*s)||s->version!=OL_LAB_ABI))return ERROR_REVISION_MISMATCH;
+    return error;
 }
 static DWORD diag(HANDLE control,ol_native_diagnostics *d) {
     ol_native_request r={sizeof(r),OL_NATIVE_ABI};
@@ -138,6 +142,7 @@ static int pending_open_case(HANDLE control,unsigned kind,unsigned release_befor
         CHECK(WaitForSingleObject(thread,5000)==WAIT_OBJECT_0);CHECK(closing.closed && !closing.error);
         CHECK(CloseHandle(thread));
     } else CHECK(CloseHandle(file));
+    CHECK(CloseHandle(ov.hEvent));CHECK(CloseHandle(port));
     if(!release_before)CHECK(roots(control,1));
     CHECK(!command(control,OL_LAB_RELEASE_CALLBACKS,0));CHECK(roots(control,0));
     CHECK(wait_files(control,1)); /* IRP/root completion can precede EvtFileClose. */
@@ -156,15 +161,19 @@ static int pending_open_case(HANDLE control,unsigned kind,unsigned release_befor
     CHECK(after.events[OL_EVENT_CLOSE_SEND]-before.events[OL_EVENT_CLOSE_SEND]==((!fail&&!release_before)?(b.open_control_completed-a.open_control_completed):0));
     CHECK(after.events[OL_EVENT_CLOSE_COMPLETE]-before.events[OL_EVENT_CLOSE_COMPLETE]==((!fail&&!release_before)?(b.open_control_completed-a.open_control_completed):0));
     CHECK(after.events[OL_EVENT_CONTRACT_FAULT]==before.events[OL_EVENT_CONTRACT_FAULT]);
-    CHECK(CloseHandle(ov.hEvent));CHECK(CloseHandle(port));
     CHECK(!command(control,OL_LAB_KEEP_CALLBACKS,0));CHECK(!command(control,OL_LAB_HOLD_OPEN,0));
     ++pending_cases;case_kind=~0u;case_release_before=~0u;return 0;
 }
 static int wait_files(HANDLE control,unsigned expected) {
     ol_lab_status s;
+    ULONGLONG start=GetTickCount64();
     for(unsigned i=0;i<500;++i) {
         if(lab_status(control,&s))return 0;
-        if(s.active_files==expected)return 1;
+        if(s.active_files==expected) {
+            ULONGLONG elapsed=GetTickCount64()-start;
+            if(elapsed>file_retirement_max_ms)file_retirement_max_ms=elapsed;
+            return 1;
+        }
         ++file_retirement_waits;Sleep(10);
     }
     return 0;
@@ -267,10 +276,10 @@ int main(int argc,char **argv) {
     CHECK(diagnostics.events[OL_EVENT_CONTRACT_FAULT]==0);
     CHECK(diagnostics.events[OL_EVENT_CALLBACK_ADD]==diagnostics.events[OL_EVENT_CALLBACK_RELEASE]);
     CHECK(CloseHandle(control));
-    printf("{\"kind\":\"real_wdf_synthetic_provider_kernel_lab\",\"checks\":%u,\"pending_open_cases\":%u,\"file_retirement_waits\":%u,"
+    printf("{\"kind\":\"real_wdf_synthetic_provider_kernel_lab\",\"checks\":%u,\"pending_open_cases\":%u,\"file_retirement_waits\":%u,\"file_retirement_max_ms\":%llu,"
            "\"callback_add\":%llu,\"callback_release\":%llu,\"roots_destroyed\":%llu,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false,"
-           "\"verifier_status_requires_external_evidence\":true}\n",checks,pending_cases,file_retirement_waits,
+           "\"verifier_status_requires_external_evidence\":true}\n",checks,pending_cases,file_retirement_waits,(unsigned long long)file_retirement_max_ms,
            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_ADD],
            (unsigned long long)diagnostics.events[OL_EVENT_CALLBACK_RELEASE],
            (unsigned long long)diagnostics.events[OL_EVENT_ROOT_DESTROY]);

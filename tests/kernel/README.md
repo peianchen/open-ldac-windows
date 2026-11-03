@@ -58,7 +58,7 @@ reason and target-stop/removal. Verifier/low-resource/forced-pending/delay scena
 require their own executed evidence. Successful runner output alone does not show
 Verifier was active. A crash is a failed test to diagnose, not an acceptable pass.
 
-## Deferred OPEN extension (ABI 2, 2026-11-03)
+## Deferred OPEN extension (ABI 3, 2026-11-03)
 
 The new runner adds 140 controlled cases: seven schedules, callback retirement
 before/after completion, repeated ten times. These are test definitions; a build
@@ -86,7 +86,13 @@ held request may remain quarantined in the guest and is not an unload pass.
 File/root and user-handle retirement are different observations. A bounded
 user-mode wait checks the synthetic status `active_files` before reusing the
 two-file capacity; a successful `CloseHandle` or zero roots alone does not prove
-that WDF has delivered `EvtFileClose`. Wait iterations are reported explicitly.
+that WDF has delivered `EvtFileClose`. All case handles including IOCP are closed
+before this wait. Wait iterations and maximum observed guest wait are reported
+explicitly; these VM timings are not Bluetooth latency or laptop power results.
+There are at most 500 polls with 10 ms sleeps; IOCTL and scheduling time also
+contribute, so this is not a strict five-second wall-clock limit. This tests
+eventual retirement, not guaranteed immediate reopen or an unlimited file cap.
+The 48-byte status uses ABI 3, distinct from the earlier 40-byte ABI 2 attempt.
 `--isolated-guest --inspect-only` queries root/I/O/callback state without running
 the fault matrix; it cannot establish a baseline pass.
 
