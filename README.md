@@ -6,6 +6,7 @@ Traditional Chinese: [research background](docs/RESEARCH_BACKGROUND.zh-TW.md),
 [development tutorial](docs/DEVELOPMENT_GUIDE.zh-TW.md),
 [development journal](docs/DEVELOPMENT_JOURNAL.zh-TW.md), and
 [executed kernel-lab record](docs/validation/KERNEL_LAB_2026-11-01.md).
+Latest: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](docs/validation/KERNEL_LAB_2026-11-03.md).
 
 An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.

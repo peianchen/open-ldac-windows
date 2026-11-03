@@ -1,8 +1,10 @@
 # Kernel test gate and evidence collection
 
-Current state, 2026-11-01: an isolated Windows VM passed the real-WDF synthetic
-provider baseline and targeted standard oneboot Verifier cases on `36bc35f`,
-including controlled unload. See the [executed report](validation/KERNEL_LAB_2026-11-01.md).
+Current state, 2026-11-03: an isolated Windows VM passed the real-WDF synthetic
+provider baseline, standard and forced-pending I/O/WDF oneboot profiles on
+`4437db1`: 6,343 checks including 140 deferred OPEN cases per profile, plus
+controlled unload. See the [latest executed report](validation/KERNEL_LAB_2026-11-03.md)
+and [earlier 363-check report](validation/KERNEL_LAB_2026-11-01.md).
 This matrix remains incomplete: additional fault profiles, actual BthPort/PnP,
 real hardware, production signing and Windows audio endpoint acceptance are pending.
 Host CI and the host WDF shim do not establish kernel or BthPort acceptance.
@@ -38,8 +40,10 @@ the separate non-PnP lab service used an embedded guest test signature.
 | Missing retirement | Delayed or absent provider release | At most two roots retained; further connect reports busy; capture recovery and power behavior |
 | PnP/power | Removal, disable/enable, radio off, sleep/resume, repeated cycles | No Verifier fault, hang, double completion or unbounded retained roots; shared devices remain usable |
 
-Run baseline first, then targeted standard Verifier, then separate low-resource,
-forced-pending and synchronization-delay scenarios. Record the actual selected
+Run baseline first, then targeted standard Verifier, then separate low-resource
+and forced-pending profiles with deterministic concurrency schedules. Kernel
+synchronization delay fuzzing is deprecated on Windows build19042 and later;
+do not present its configuration as an executed modern-Windows test. Record the actual selected
 rules and exercised fault sites; checking a Verifier option without hitting the
 case is not evidence. Do not treat “no crash” or counter equality as complete
 acceptance. Inspect crash dumps, WDF objects, pool/request/reference counts and

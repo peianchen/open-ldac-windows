@@ -10,6 +10,7 @@
 - [完整開發教學](docs/DEVELOPMENT_GUIDE.zh-TW.md)：離線建置、原生傳輸、取消與釋放、VM／簽章及真實核心當機除錯。
 - [開發紀錄與心得](docs/DEVELOPMENT_JOURNAL.zh-TW.md)：版本演進、失敗、修正理由與工程反思。
 - [2026-11-01 核心實測報告](docs/validation/KERNEL_LAB_2026-11-01.md)：精確版本／雜湊、363 項案例、active Verifier 與未驗證部分。
+- [2026-11-03 延後連線與故障驗證](docs/validation/KERNEL_LAB_2026-11-03.md)：三輪各6,343項檢查，含140個延後連線案例、標準與強制pending Verifier、實際失敗與回收觀測。
 
 文件區分官方規格、廠商說明、實作、實測、推論與待驗證設計；沒有把模擬或離線結果當成音質／耗電實測。
 
