@@ -2,8 +2,10 @@
 
 Implemented: exact numeric bitrate selection in the offline tool, supported-rate
 listing and a user-mode encoder API for changing bitrate between encode calls.
-The original hq/sq/mq CLI labels continue to work. There is no live headset/UI
-control yet; the Windows audio endpoint and streaming service remain unfinished.
+The original hq/sq/mq CLI labels continue to work. The native-channel prototype
+now has an explicit SCM worker accepting manual requests, with owner-thread codec
+changes tested through a fake peer. A UI, Windows PCM endpoint and real-headset
+behavior remain unverified. See [the worker contract](PLAYBACK_SERVICE.md).
 
 | Source sampling family | HQ (default) | SQ | MQ |
 | --- | --- | --- | --- |
@@ -56,6 +58,13 @@ mode during a change. This API does not confirm a headset's negotiated codec,
 reconfigure AVDTP, or prove that changing quality during real playback is safe.
 
 ## Validation
+
+The prototype service accepts user-defined controls 128/129/130 for HQ/SQ/MQ,
+mapped to the active source family. Its handler queues an atomic request; the
+encoding owner applies it. The VM SCM selftest validates synthetic control
+mapping only, while portable playback tests exercise the real codec change.
+Neither establishes that an XM6 has played a requested mode. No service is
+automatically installed or started by the executable.
 
 Core tests change modes repeatedly on all four supported sample rates, inspect
 emitted frame headers and sizes after settling, and verify invalid requests leave

@@ -1,10 +1,12 @@
 # Native Windows architecture decision
 
-Status: M0 portable core plus an M1 diagnostic native transport and probe.
+Status, 2026-11-04: M0 portable core plus M1 native transport, an integrated
+user-mode WAV playback pipeline, Windows I/O adapter and SCM audio worker.
+See [the playback implementation and limits](PLAYBACK_SERVICE.md).
 The WDK build/INF check has passed. A separate real-WDF synthetic-provider lab
 passed baseline/standard Verifier cases; the production Bluetooth transport's
 actual BthPort load, hardware compatibility, playback and power remain unverified.
-The full audio architecture below is proposed. See the [executed lab record](validation/KERNEL_LAB_2026-11-01.md).
+The Windows PCM endpoint and physical-headset acceptance below remain proposed. See the [executed lab record](validation/KERNEL_LAB_2026-11-01.md).
 
 ## Target path
 
@@ -20,9 +22,7 @@ Windows application / audio engine
 
 A separate control path handles SDP, AVDTP transactions, endpoint discovery,
 capability negotiation, configure/open/start/suspend/close/abort and remote events.
-The portable AVDTP helpers implement only basic single-packet parsing and two
-command builders; there is no live signaling state machine or fragmented-packet
-reassembly in M0. A complete implementation must negotiate mandatory baseline
+The M1 single-packet initiator now drives endpoint selection, configure/OPEN, media readiness, START, SUSPEND and ABORT through the native I/O adapter. Full peer command handling, fragmented signaling, graceful closure and interoperability remain open. A complete implementation must negotiate mandatory baseline
 capabilities, validate peer commands and recover from rejected configurations.
 
 ## Why user-mode encoding with a native transport driver
@@ -70,7 +70,7 @@ system service, autorun entry or permanent background polling is supplied by M0.
 ## Audio endpoint decision still open
 
 A transport driver alone does not create an ordinary Windows sound output.
-Prototype file-to-headset streaming first, then add an audio endpoint and service.
+The file-to-native-channel prototype and explicit SCM worker are implemented; actual file-to-headset playback is not yet verified. Add the production PCM endpoint after that transport/playback gate.
 Evaluate Microsoft's SysVAD/WaveRT reference versus the supported ACX model for
 the selected minimum Windows version. WASAPI loopback of another output may be
 a diagnostic aid but is not a substitute for the project's production endpoint.

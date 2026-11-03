@@ -25,6 +25,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'AVDTP session test compilation failed' }
     & $compiler @common 'tools/native_probe.c' '-lsetupapi' '-o' (Join-Path $buildRoot 'wldac_probe.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Native probe compilation failed' }
+    $play = $common + @('src/playback.c', 'src/wav_source.c')
+    & $compiler @play 'tests/playback_tests.c' '-o' (Join-Path $buildRoot 'playback_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Playback test compilation failed' }
+    & $compiler @play 'tests/wav_source_tests.c' '-o' (Join-Path $buildRoot 'wav_source_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'WAV source test compilation failed' }
+    & $compiler @play '-D_WIN32_WINNT=0x0a00' 'src/win_native_io.c' 'tools/player.c' '-lsetupapi' '-ladvapi32' '-lshell32' '-o' (Join-Path $buildRoot 'wldac_player.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows player compilation failed' }
+    & $compiler @play '-D_WIN32_WINNT=0x0a00' 'tests/windows/native_io_tests.c' '-lsetupapi' '-o' (Join-Path $buildRoot 'native_io_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Windows asynchronous I/O test compilation failed' }
     & $compiler 'cc' '-target' 'x86_64-windows-gnu' '-mcpu=baseline' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-Iinclude' 'src/lifetime.c' 'tests/lifetime_tests.c' '-o' (Join-Path $buildRoot 'lifetime_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Lifecycle test compilation failed' }
     & (Join-Path $buildRoot 'lifetime_tests.exe')
@@ -37,6 +46,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & (Join-Path $buildRoot 'avdtp_session_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'AVDTP session tests failed' }
+    foreach ($name in @('playback_tests','wav_source_tests','native_io_tests')) {
+        & (Join-Path $buildRoot ($name+'.exe'))
+        if ($LASTEXITCODE -ne 0) { throw "$name failed" }
+    }
 } finally {
     $env:TEMP = $oldTemp
     $env:TMP = $oldTmp

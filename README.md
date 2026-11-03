@@ -6,7 +6,8 @@ Traditional Chinese: [research background](docs/RESEARCH_BACKGROUND.zh-TW.md),
 [development tutorial](docs/DEVELOPMENT_GUIDE.zh-TW.md),
 [development journal](docs/DEVELOPMENT_JOURNAL.zh-TW.md), and
 [executed kernel-lab record](docs/validation/KERNEL_LAB_2026-11-01.md).
-Latest: [observed WDF low-resource failures and recovery, 2026-11-04](docs/validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
+Latest: [native channel/audio-worker implementation and executed VM tests, 2026-11-04](docs/validation/PLAYBACK_USERMODE_2026-11-04.md).
+Previous: [observed WDF low-resource failures and recovery](docs/validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
 Previous: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](docs/validation/KERNEL_LAB_2026-11-03.md).
 
 An independent open-source project developing LDAC playback through Windows'
@@ -80,8 +81,9 @@ battery hours, RF retransmissions, or listening scores are measured**.
 
 Manual numeric selection supports 990/660/330 kbps for the 48/96 kHz family and
 909/606/303 kbps for 44.1/88.2 kHz. Omitting the encode selector defaults to HQ.
-The user-mode API also supports serialized encoder-mode changes; live headset
-controls are not implemented. See [bitrate control](docs/BITRATE_CONTROL.md).
+The user-mode API supports serialized encoder-mode changes, and the experimental
+SCM worker queues manual requests. Real-headset behavior remains unverified.
+See [bitrate control](docs/BITRATE_CONTROL.md).
 
 ## Native Windows driver roadmap
 
@@ -89,8 +91,8 @@ controls are not implemented. See [bitrate control](docs/BITRATE_CONTROL.md).
 | --- | --- | --- |
 | M0 | Offline codec, protocol primitives, quality/power policy and tests | Implemented; see verification report |
 | M1 | KMDF L2CAP transport, XM6-specific INF and discovery probe | Source implemented; build/runtime validation tracked separately |
-| M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Not implemented |
-| M3 | Windows audio endpoint and event-driven user-mode encoding service | Not implemented |
+| M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Bounded initiator/native-worker prototype; real headset not verified |
+| M3 | Windows audio endpoint and event-driven user-mode encoding service | WAV/SCM worker prototype exists; Windows PCM endpoint not implemented |
 | M4 | Power/latency/glitch measurements, suspend/resume and coexistence | Not measured |
 | M5 | Signed, reviewed installer and recovery path | Not implemented |
 

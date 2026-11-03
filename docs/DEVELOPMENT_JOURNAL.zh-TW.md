@@ -188,3 +188,25 @@ callback add／release 各 173，roots destroyed 173。Verifier runtime 只列�
 從離線檢查數推算聲音或電力成果。四位元交易標籤重用後無法辨識任意古老同 tuple，
 因此逾時要汰換整個通道世代，而不是宣稱本地 serial 已改變遠端 wire 格式。
 契約、已執行測試與互通限制見[協商模組說明](AVDTP_SESSION.md)。
+
+## 2026-11-04：從協商函式走到原生通道與服務
+
+本輪把session、實際MTU編碼、RTP、唯讀WAV與Windows雙handle adapter串起來，
+再加入真正的SCM ServiceMain/HandlerEx。停止只發事件，owner等I/O實際完成才釋放；
+EOF的signaling monitor交給SUSPEND接收，不另開一筆讀取把舊要求遺留。
+
+本機與隔離VM最終分別通過510項fake-peer播放、689項WAV及1196項真Windows
+named-pipe I/O檢查；VM實際服務接受三種手動品質控制後正常停止。壞WAV與缺少
+介面的真服務路徑也觀察到SCM STOPPED和各自錯誤11／259，來源雜湊不變。
+sc start回0只表示啟動要求受理，不能當作播放成功。
+
+第二輪曾在10ms等待期待失敗，舊診斷沒有保存adapter錯誤碼；20次自然重跑未重現。
+受控60ms延遲能得到ERROR_TIMEOUT，但不能倒推首次失敗已確診。最後把功能交接
+與VM時序分開測，正式40ms限制和強制延遲負例保持不變。早期測試EXE曾被重建
+覆寫，只保留該版雜湊／輸出；後續改為另外保存診斷與最終產物。
+
+**心得：可呼叫真實API、服務能停止、耳機能完整播放，是不同的證據。**
+目前EOF只有發送端名義時間軸，不能保證接收端jitter-buffer尾音。這仍需delay
+reporting、graceful close與實機捕捉；不以新模組數量或測試CHECK總數代替音質成果。
+HQ、手動碼率及電池不降級保持；Windows PCM端點、真正BthPort/XM6、正式簽章與
+日用安裝仍有獨立gate。過程、觀測與效度限制見[本輪報告](validation/PLAYBACK_USERMODE_2026-11-04.md)。

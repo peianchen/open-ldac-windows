@@ -2,8 +2,9 @@
 
 The VM low-resource campaign on `969a9ef` passed its stated gates before this
 user-mode playback work began. See the [executed resource-fault report](validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
-This module is an offline protocol foundation. It is not connected to BthPort,
-the MediaTek radio, XM6, a Windows audio endpoint or an encoder service yet.
+This module now feeds the [native-channel WAV/audio-worker prototype](PLAYBACK_SERVICE.md).
+The Windows adapter is implemented and user-mode VM tests exist, but actual
+BthPort/MediaTek/XM6 playback and a Windows PCM endpoint are still unverified.
 
 ## Contract and quality
 

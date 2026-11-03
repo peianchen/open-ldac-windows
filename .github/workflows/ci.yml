@@ -19,6 +19,8 @@ jobs:
       - run: python tests/kernel/audit_low_resource.py
       - if: runner.os == 'Windows'
         run: python tests/integration.py build/Release/wldac_cli.exe
+      - if: runner.os == 'Windows'
+        run: python tests/player_cli.py build/Release/wldac_player.exe
       - if: runner.os != 'Windows'
         run: python tests/integration.py build/wldac_cli
 
@@ -27,8 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cmake -S . -B build-lifetime -DOL_LIFETIME_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
-      - run: cmake --build build-lifetime --target lifetime_tests native_adapter_tests avdtp_session_tests
-      - run: ctest --test-dir build-lifetime -R "lifetime_tests|native_adapter_tests|avdtp_session_tests" --output-on-failure
+      - run: cmake --build build-lifetime --target lifetime_tests native_adapter_tests avdtp_session_tests playback_tests wav_source_tests
+      - run: ctest --test-dir build-lifetime -R "lifetime_tests|native_adapter_tests|avdtp_session_tests|playback_tests|wav_source_tests" --output-on-failure
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
