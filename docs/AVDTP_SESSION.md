@@ -1,0 +1,93 @@
+# Playback negotiation: bounded initiator subset
+
+The VM low-resource campaign on `969a9ef` passed its stated gates before this
+user-mode playback work began. See the [executed resource-fault report](validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
+This module is an offline protocol foundation. It is not connected to BthPort,
+the MediaTek radio, XM6, a Windows audio endpoint or an encoder service yet.
+
+## Contract and quality
+
+`include/avdtp_session.h` and `src/avdtp_session.c` implement one outstanding
+transaction on an owner thread. The caller supplies a fresh transport generation,
+incoming packet events, send failures, deadlines and media-channel readiness.
+The module allocates no heap, starts no threads/timers and performs no I/O or
+polling. A fixed array admits at most 62 remote endpoints.
+
+It discovers available audio sinks and queries their capabilities in sequence,
+rather than assuming the first sink supports LDAC. Selection requires stereo
+LDAC at exactly the caller's source sampling rate. An otherwise usable sink
+requiring conversion is not configured: there is no resampler in this path.
+Supplying an explicit 88.2/96 kHz source is supported; the module does not create
+high-rate PCM by upsampling.
+
+The proposed configuration contains Media Transport and LDAC only. Optional
+advertised content protection is not claimed as negotiated support. The peer
+must accept the exact unprotected proposal. Protected playback is unsupported.
+HQ remains the encoder default on AC and battery; manual kbps is an encoder
+setting, not an additional AVDTP codec field. The session does not adapt bitrate.
+These policies do not establish measured listening quality or battery savings.
+
+## Progression and failure
+
+The command/accept sequence is DISCOVER, per-candidate GET_CAPABILITIES,
+SET_CONFIGURATION and OPEN. OPEN acceptance reaches WAIT_MEDIA. Only the
+transport owner's explicit `media_ready(generation)` permits START; only a
+matching START acceptance reaches STREAMING. SUSPEND acceptance reaches
+SUSPENDED, from which resume emits START. Configured idle sessions can ABORT;
+an outstanding transaction returns BUSY, so its owner must complete it or
+terminate the transport before restarting. ABORT acceptance invalidates the
+transport epoch and the owner closes the channel.
+
+Only matching transaction label, signal and local generation can advance a
+pending response. Payload shape is checked before acceptance. Unknown/stale
+response tuples do not advance state. Capacity/NULL failures during command
+construction preserve state, transaction counters and output tokens.
+
+Malformed matching responses, peer commands, fragments, matching reject,
+timeout and send/transport failure terminate this subset. It does not attempt
+interoperability recovery by guessing peer state. The owner must close/retire
+the old channels before initializing with a strictly higher generation.
+Timers and send-failure callbacks carry generation plus a monotonic serial,
+label and signal, protecting later work from stale local callbacks.
+
+AVDTP has a four-bit wire transaction label. An arbitrarily ancient duplicate
+with the same label/signal after wrap on the same channel cannot be identified
+using that header alone. Local tokens do not add a serial to the peer's wire
+reply. A timeout therefore invalidates the entire channel epoch rather than
+reusing that timed-out transaction on it.
+
+## Verification and next integration
+
+`tests/avdtp_session_tests.c` uses synthetic wire fixtures: multi-endpoint
+selection, exact rates, malformed/rejected responses, capacity guards,
+generation/token handling and progression through media-ready/start/suspend/
+resume/abort. It is included in CMake/CTest and the Windows Zig helper; the CI
+sanitizer job also exercises it. Passing these tests is not a headset trace,
+Bluetooth qualification or audio playback result.
+
+Executed locally on 2026-11-04 with the existing Zig 0.14.1 Windows toolchain:
+4,837 protocol CHECK evaluations passed. The same final build passed 5,805 core
+codec/protocol/policy checks, 18,976 lifecycle checks (1,020 modeled schedules),
+7,532 production-adapter host-shim checks and 104 WAV/CLI integration cases.
+CHECK counts include helper assertions and repeated flows, not that many
+independent scenarios. None of these host tests establishes kernel or RF behavior.
+
+Independent review found that parsing an unrelated reserved-signal/oversized
+response before matching its tuple could invalidate live work. The implementation
+now matches a readable single-packet response header before validating a matching
+payload. Regressions require unrelated traffic to leave the session byte-for-byte
+unchanged; a matching oversized packet still invalidates transport. Short headers,
+fragments and peer commands keep the explicitly unsupported/fail-closed behavior.
+
+The next integration must provide asynchronous signaling I/O and separate media
+channel lifetime, cancellation/deadline ownership, actual peer packet traces and
+an explicit teardown path. Peer-initiated commands, fragmented signaling,
+graceful CLOSE/reconfiguration/content protection and interoperability still
+require development before claiming a complete AVDTP implementation. Windows
+PCM endpoint/service, real PnP/sleep behavior, signing/restore and quality/power
+measurements remain separate gates before daily-use installation.
+
+Protocol references: Bluetooth SIG [AVDTP 1.3](https://www.bluetooth.com/specifications/specs/a-v-distribution-transport-protocol-1-3/),
+sections 6.2 (transaction model), 8.4 (headers) and 8.6–8.16 (commands/response
+formats). The associated erratum and complete profile requirements remain part
+of any future conformity work; this subset makes no conformity claim.

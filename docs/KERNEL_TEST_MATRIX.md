@@ -1,10 +1,12 @@
 # Kernel test gate and evidence collection
 
-Current state, 2026-11-03: an isolated Windows VM passed the real-WDF synthetic
+Current state, 2026-11-04: an isolated Windows VM passed the real-WDF synthetic
 provider baseline, standard and forced-pending I/O/WDF oneboot profiles on
 `4437db1`: 6,343 checks including 140 deferred OPEN cases per profile, plus
 controlled unload. See the [latest executed report](validation/KERNEL_LAB_2026-11-03.md)
 and [earlier 363-check report](validation/KERNEL_LAB_2026-11-01.md).
+On `969a9ef`, a separate KMDF allocation-threshold sweep (0..128) observed 124 resource-failed calls across 18 sites, including all ten required transport sites. All final resource snapshots balanced, and the unpoisoned 6,343-check regression and 130/130 runtime load/unload passed. See the [low-resource report](validation/KERNEL_LOW_RESOURCE_2026-11-04.md). This is not random/DIF coverage or real BthPort acceptance.
+
 This matrix remains incomplete: additional fault profiles, actual BthPort/PnP,
 real hardware, production signing and Windows audio endpoint acceptance are pending.
 Host CI and the host WDF shim do not establish kernel or BthPort acceptance.

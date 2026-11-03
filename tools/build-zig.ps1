@@ -16,11 +16,13 @@ try {
     $env:ZIG_LOCAL_CACHE_DIR = Join-Path $buildRoot '.zig-local-cache'
     $common = @('cc','-target','x86_64-windows-gnu','-mcpu=baseline',
         '-std=c11','-O2','-Wall','-Wextra','-Iinclude','-Ivendor/libldac/inc',
-        'src/wldac.c','src/avdtp.c','vendor/libldac/src/ldaclib.c','vendor/libldac/src/ldacBT.c')
+        'src/wldac.c','src/avdtp.c','src/avdtp_session.c','vendor/libldac/src/ldaclib.c','vendor/libldac/src/ldacBT.c')
     & $compiler @common 'tools/cli.c' '-o' (Join-Path $buildRoot 'wldac_cli.exe')
     if ($LASTEXITCODE -ne 0) { throw 'CLI compilation failed' }
     & $compiler @common 'tests/core_tests.c' '-o' (Join-Path $buildRoot 'core_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed' }
+    & $compiler @common 'tests/avdtp_session_tests.c' '-o' (Join-Path $buildRoot 'avdtp_session_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'AVDTP session test compilation failed' }
     & $compiler @common 'tools/native_probe.c' '-lsetupapi' '-o' (Join-Path $buildRoot 'wldac_probe.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Native probe compilation failed' }
     & $compiler 'cc' '-target' 'x86_64-windows-gnu' '-mcpu=baseline' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-Iinclude' 'src/lifetime.c' 'tests/lifetime_tests.c' '-o' (Join-Path $buildRoot 'lifetime_tests.exe')
@@ -33,6 +35,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Native adapter host tests failed' }
     & (Join-Path $buildRoot 'core_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+    & (Join-Path $buildRoot 'avdtp_session_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'AVDTP session tests failed' }
 } finally {
     $env:TEMP = $oldTemp
     $env:TMP = $oldTmp

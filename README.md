@@ -6,7 +6,8 @@ Traditional Chinese: [research background](docs/RESEARCH_BACKGROUND.zh-TW.md),
 [development tutorial](docs/DEVELOPMENT_GUIDE.zh-TW.md),
 [development journal](docs/DEVELOPMENT_JOURNAL.zh-TW.md), and
 [executed kernel-lab record](docs/validation/KERNEL_LAB_2026-11-01.md).
-Latest: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](docs/validation/KERNEL_LAB_2026-11-03.md).
+Latest: [observed WDF low-resource failures and recovery, 2026-11-04](docs/validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
+Previous: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](docs/validation/KERNEL_LAB_2026-11-03.md).
 
 An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.
@@ -23,6 +24,7 @@ Native transport code/build results are not playback evidence.**
   concatenated LDAC transport frames; no resampling, decoding, or Bluetooth output.
 - LDAC capability selection, basic single-packet AVDTP discovery/capability
   parsing and configuration builders, and bounded RTP/LDAC media packet assembly.
+- A bounded single-packet [AVDTP initiator session](docs/AVDTP_SESSION.md): endpoint traversal, exact PCM rate, media-ready gating and terminal error handling; offline tests only.
 - Explicit quality/power policy and a reproducible offline encoder CPU benchmark.
 - Tests for malformed input, MTU limits, packet rollover, codec configurations,
   file preservation and frame headers. Tests do not prove audio quality or playback.

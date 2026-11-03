@@ -452,6 +452,21 @@ python tools/benchmark.py build/wldac_cli.exe --output build/cpu-report.json
 
 本專案目前適合參與開發與研究；仍未提供可取代一般 A2DP 的日用安裝包。
 
+## 10. 2026-11-04：低資源驗證後的協商模組
+
+後續版本使用真實 WDF 配置門檻故障，明確區分每次 API 錯誤、實際 WDF 失敗站點與
+最終退場。129 個門檻及取消故障條件後的恢復已通過本輪定義的 gate；方法、原始
+FINAL 數值、雜湊與未命中站點見[低資源報告](validation/KERNEL_LOW_RESOURCE_2026-11-04.md)。
+它補充前面較早的標準 profile 結果，並不把不同版本混為同一次實驗。
+
+通過後新增的[有界協商模組](AVDTP_SESSION.md)把 DISCOVER、候選端點能力、
+設定與 OPEN/START 分開。OPEN 接受不等於媒體通道已就緒；採樣率與 PCM 不符也不能
+直接餵進編碼器。模組要求精確採樣率，只有 matched accept 與顯式 media-ready 才前進。
+逾時使整個通道世代失效，避免重新使用已逾時的 wire 交易。
+
+目前這部分仍是離線 initiator subset。它需要後續的原生通道服務、端點、真耳機
+trace 與聲音／電力量測，才能回答「XM6 實際可否穩定播放」；沒有改變日用安裝門檻。
+
 ## 官方參考資料
 
 - [Bluetooth profile drivers](https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/bluetooth-profile-drivers-overview)
