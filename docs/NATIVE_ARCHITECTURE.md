@@ -22,7 +22,7 @@ Windows application / audio engine
 
 A separate control path handles SDP, AVDTP transactions, endpoint discovery,
 capability negotiation, configure/open/start/suspend/close/abort and remote events.
-The M1 single-packet initiator now drives endpoint selection, configure/OPEN, media readiness, START, SUSPEND and ABORT through the native I/O adapter. Full peer command handling, fragmented signaling, graceful closure and interoperability remain open. A complete implementation must negotiate mandatory baseline
+The M1 initiator now drives endpoint selection, configure/OPEN, media readiness, START and normal CLOSE through the native I/O adapter. Incoming transaction responses use bounded signaling reassembly before the complete-message session parser. Full peer command handling, on-wire closure completion and interoperability remain open. A complete implementation must negotiate mandatory baseline
 capabilities, validate peer commands and recover from rejected configurations.
 
 ## Why user-mode encoding with a native transport driver

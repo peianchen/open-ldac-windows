@@ -1,0 +1,411 @@
+{
+  "passed": true,
+  "source_base": "d10a1312b2d2f66aea9875ba509d69f6542d69ca",
+  "reassembly_checks": 292045,
+  "session_checks": 6608,
+  "portable_checks": 867,
+  "wave_checks": 689,
+  "windows_os_io_checks": 1303,
+  "scm": {
+    "kind": "scm_no_rf_selftest",
+    "service_main_invoked": true,
+    "handler_registered": true,
+    "running_reported": true,
+    "stop_pending_reported": true,
+    "test_source_rate": 48000,
+    "synthetic_control_mapping": true,
+    "hq_requested_kbps": 990,
+    "sq_requested_kbps": 660,
+    "mq_requested_kbps": 330,
+    "stop_controls": 1,
+    "shutdown_controls": 0,
+    "hq_controls": 1,
+    "sq_controls": 1,
+    "mq_controls": 1,
+    "rejected_controls": 0,
+    "requested_kbps": 330,
+    "worker_result": 0,
+    "worker_win32_error": 0,
+    "service_status_error": 0,
+    "stop_signalled": true,
+    "timed_out": false,
+    "bluetooth_transmitted": false,
+    "codec_exercised": false
+  },
+  "expected_service_failures": {
+    "malformed-source-service": {
+      "expected_win32_exit": 11,
+      "source_after_sha256": "361C7CB221E92D38F093026B12F6B9F4C430922D683953EF21A53606111D7C31",
+      "start_exit": 0,
+      "source_before_sha256": "361C7CB221E92D38F093026B12F6B9F4C430922D683953EF21A53606111D7C31",
+      "source_unchanged": true,
+      "status": {
+        "Type": 16,
+        "Current": 1,
+        "Accepted": 0,
+        "Win32Exit": 11,
+        "SpecificExit": 0,
+        "Checkpoint": 0,
+        "WaitHint": 0,
+        "ProcessId": 0,
+        "Flags": 0
+      }
+    },
+    "missing-native-interface-service": {
+      "expected_win32_exit": 259,
+      "source_after_sha256": "BBEDE5C7D4A8E48D937EC6F61EECCF0C2EFE198F84FD5F0F2B53233E5BB53B0D",
+      "start_exit": 0,
+      "source_before_sha256": "BBEDE5C7D4A8E48D937EC6F61EECCF0C2EFE198F84FD5F0F2B53233E5BB53B0D",
+      "source_unchanged": true,
+      "status": {
+        "Type": 16,
+        "Current": 1,
+        "Accepted": 0,
+        "Win32Exit": 259,
+        "SpecificExit": 0,
+        "Checkpoint": 0,
+        "WaitHint": 0,
+        "ProcessId": 0,
+        "Flags": 0
+      }
+    }
+  },
+  "executables": [
+    {
+      "sha256": "7FA1E3C924EC8E4E204A56222FBC6E32B12E0881A11DFA8AE248505C606874AF",
+      "name": "avdtp_reassembly_tests.exe",
+      "bytes": 236544
+    },
+    {
+      "sha256": "5B1788463E90CD847B4300601786ED2B3348F0B81341541677ACA2212B651CAC",
+      "name": "avdtp_session_tests.exe",
+      "bytes": 274432
+    },
+    {
+      "sha256": "2278C9626D73A0ABBE7C37998B44D63AD5D7CB03E9F1F0915D506510BD8FEA09",
+      "name": "playback_tests.exe",
+      "bytes": 259072
+    },
+    {
+      "sha256": "42524E3B1ADE2A913C12025D3651BE03B477435FED54FFCC46CC9E3A6A6F6016",
+      "name": "wav_source_tests.exe",
+      "bytes": 241664
+    },
+    {
+      "sha256": "C03EBD156C81FCE493DABF028A08CA8D7D6C0F4CB53E942023F40EDDB356FBE6",
+      "name": "native_io_tests.exe",
+      "bytes": 266240
+    },
+    {
+      "sha256": "9296336FF4D676101D6E60C507193905C774F3295999216BDD1A8F584B9C9DC6",
+      "name": "wldac_player.exe",
+      "bytes": 250368
+    },
+    {
+      "sha256": "6E0676370053B8F4073E695268BFD53CF82E6A78426CF7C4116CC9D6DB2CF5C6",
+      "name": "wldac_probe.exe",
+      "bytes": 230912
+    }
+  ],
+  "build_input_count": 66,
+  "kernel_changed": false,
+  "real_bluetooth_verified": false,
+  "build_inputs": [
+    {
+      "path": "src/avdtp_reassembly.c",
+      "sha256": "E73295A77249E8446076EB0257F09371E7DD24D72394E0B4D6F167933D16B849"
+    },
+    {
+      "path": "src/avdtp_session.c",
+      "sha256": "361B55A665CC6F9CC75A3455F6E6E98F224F490D634D4688B4B673EED8608465"
+    },
+    {
+      "path": "src/avdtp.c",
+      "sha256": "924458CCC4676D1C3FE170B69B8932516172E826510A45F38CF8BEFABB9AC1C3"
+    },
+    {
+      "path": "src/lifetime.c",
+      "sha256": "EFB3105A5E704C8BAEB430295C8A14BAE852E2697CE572CB2113C2A66485D7C4"
+    },
+    {
+      "path": "src/playback.c",
+      "sha256": "76FE403A18E69FF880F1776AEC0F70C3D3457F43D606B040E28A709FAD4884D4"
+    },
+    {
+      "path": "src/wav_source.c",
+      "sha256": "11C444F58F0CDD742598409D7F103E290311E40E0608A947AC9CF44EEFDE11D0"
+    },
+    {
+      "path": "src/win_native_io.c",
+      "sha256": "E22EE0E8F6EF6768E806E39C916F720A30F58BCA597E39DCCC3BAA39EFFD21EA"
+    },
+    {
+      "path": "src/wldac.c",
+      "sha256": "0025A4A2A2CCA33E359C961AF0D60A129C0B08F93782D7E56A76727ED5889309"
+    },
+    {
+      "path": "include/avdtp_reassembly.h",
+      "sha256": "EB6A8E61829A16272EBF60F281962E059BEB6CA23D1E8F75900AD0FE058A6D6E"
+    },
+    {
+      "path": "include/avdtp_session.h",
+      "sha256": "2B462051461D930B1FE4C9352A8DE214569D873C7EF91D9716866FDFE01F4E5A"
+    },
+    {
+      "path": "include/avdtp.h",
+      "sha256": "B9121CB23698BE577E71C1CD5C0F10C68AE8435AB7B1047A55A575CB65B6BF4E"
+    },
+    {
+      "path": "include/lifetime.h",
+      "sha256": "9EF58588D4FB14C1DE99231437C33BE4F485146EBFCEDE38CF1D49B53BC36EB2"
+    },
+    {
+      "path": "include/native_transport.h",
+      "sha256": "D9C2C79D0235D565F586853E7F3CECC1EA361AB461262C391D8A28393E91D43B"
+    },
+    {
+      "path": "include/playback.h",
+      "sha256": "27108C55638F29AC99849305F3EC3B5F51EEBC7F44A82A35D4965BE508F46603"
+    },
+    {
+      "path": "include/wav_source.h",
+      "sha256": "4D487D991C2B9601B03F4618E831F6ED76F8B88EC9AD7650F471F1FB0D1ED1F4"
+    },
+    {
+      "path": "include/win_native_io.h",
+      "sha256": "D6BD055E501AF46C39D5EB2D3C572038978332685A82BC3EB0A17081D5CC8A60"
+    },
+    {
+      "path": "include/wldac.h",
+      "sha256": "582786741034E9A4D5B436AB67CD04A223668A39C19C8E8710E89996EE8A8053"
+    },
+    {
+      "path": "tests/avdtp_reassembly_tests.c",
+      "sha256": "66622A85EE26D093F27C608D6E0E43C4471CFC8E1172C7122F5123CD6F990370"
+    },
+    {
+      "path": "tests/avdtp_session_tests.c",
+      "sha256": "3D93470CCCC4A74E49A66AE72EBBA4BBB22ADE6524AEF439C6894820CBD242B9"
+    },
+    {
+      "path": "tests/core_tests.c",
+      "sha256": "74E646BE18FD9ADF360E887A4B6F85D18886B73B834F66E515A88CF67CC494A1"
+    },
+    {
+      "path": "tests/lifetime_tests.c",
+      "sha256": "77E28662DB892D4F169609C9144B851259A9871ADD65FB1BB4085B86E1FCCEA7"
+    },
+    {
+      "path": "tests/playback_tests.c",
+      "sha256": "AFA727C4A96151C6009C5C77BC4EAB1989EF8A9783F9395D45D5803F73E3CF58"
+    },
+    {
+      "path": "tests/wav_source_tests.c",
+      "sha256": "CC1D96F9F79D852FA07FCE26AE86BCF62A9174AD2F0C426C030C163F80A6AE96"
+    },
+    {
+      "path": "tests/kernel/lab_control.h",
+      "sha256": "C58D89C0847261DB606B607D10B4E5322650A15FE876932C0E6EEA105F8794DF"
+    },
+    {
+      "path": "tests/kernel/lab_driver.c",
+      "sha256": "47EFB4AC01640288D6E20480BF581061B417E58A876B676CB0E1D5FD21A05DE4"
+    },
+    {
+      "path": "tests/kernel/lab_observer.h",
+      "sha256": "E06E8AA7F1FF48655AE74D759F845B3999E4EF551842B52BE5EB602D4D26FA7C"
+    },
+    {
+      "path": "tests/kernel/lab_runner.c",
+      "sha256": "FF2CA1810CC96A5515B8139B1EA0E19D9E3BFE49A6A3B521411C23F5D11A4EC2"
+    },
+    {
+      "path": "tests/native/native_adapter_tests.c",
+      "sha256": "C2DA1960FD41BC68466142B98A9DAF11789555D0C88562A16CF1D4E6C0CA1704"
+    },
+    {
+      "path": "tests/native/native_platform.h",
+      "sha256": "6A136ED9675408F82BA4BC47D90B815A236E23FDD39C45339F3F25188A2984EB"
+    },
+    {
+      "path": "tests/windows/native_io_tests.c",
+      "sha256": "20F55CF8E735AC888C7FAB4B6DF5DA39CE8B9554070B58628364E26E85C3DE72"
+    },
+    {
+      "path": "vendor/libldac/abr/inc/ldacBT_abr.h",
+      "sha256": "873E2361F863F29C6E281C50C2C851986AD1E77980B9153BAE8B7C1458FB295E"
+    },
+    {
+      "path": "vendor/libldac/abr/src/ldacBT_abr.c",
+      "sha256": "D06B7B3CBF88C65BB7DED41DB08B88161B46265A96EF9A4851A904B810759FC4"
+    },
+    {
+      "path": "vendor/libldac/inc/ldacBT.h",
+      "sha256": "3ED5B68473241BB35B705179A4F8C03DB036A6D5FE061B157DAB7C4D3E6438E2"
+    },
+    {
+      "path": "vendor/libldac/src/bitalloc_ldac.c",
+      "sha256": "E98519C3390403C9656B65A1F5D034018D657900F79EB8BF8760A0655D162896"
+    },
+    {
+      "path": "vendor/libldac/src/bitalloc_sub_ldac.c",
+      "sha256": "8701D24DD9F7DAB9A90FDA1BAEF7A551DCC33E3FF828E6262406611CAB79F3CD"
+    },
+    {
+      "path": "vendor/libldac/src/encode_ldac.c",
+      "sha256": "57BF4E9F9B1FB4F03FE7F80F017CCCCE81A9A0F8152226F299D5F3086D744F90"
+    },
+    {
+      "path": "vendor/libldac/src/fixp_ldac.h",
+      "sha256": "0D6CEF2F335F8AAE61748DF503B2A738797B26A746C8E34B0585760CF2158265"
+    },
+    {
+      "path": "vendor/libldac/src/func_fixp_ldac.c",
+      "sha256": "5EB3E9153F3258806F70909D1250DA0F74ECBD8DFAB43E766BE061323D072AED"
+    },
+    {
+      "path": "vendor/libldac/src/ldac.h",
+      "sha256": "01391453252AF526EDD002C236FC23AACB5817BC297906C684E946BBF8485401"
+    },
+    {
+      "path": "vendor/libldac/src/ldacBT_api.c",
+      "sha256": "48C79F1B1D28C075F6923D61A02B5F6569857D1AE9757233828D0858BE03CC3D"
+    },
+    {
+      "path": "vendor/libldac/src/ldacBT_ex.h",
+      "sha256": "DCF24CEFAD571495EA2C6BE47952ABF0EFC73E12DEAEE03431B68B0A0CAD6FB0"
+    },
+    {
+      "path": "vendor/libldac/src/ldacBT_internal.c",
+      "sha256": "EF4BF2E73FAEC260A910A06C22D76AC96016D58D939207D8FCF397F93538DB82"
+    },
+    {
+      "path": "vendor/libldac/src/ldacBT_internal.h",
+      "sha256": "BF4D97923BCD75F6D14C41918C54FACE8C36718F758BE482CCCE6C57F168E0AB"
+    },
+    {
+      "path": "vendor/libldac/src/ldacBT.c",
+      "sha256": "6B9E9920BE3968FD7EBDD1CE1ED3676532CFCFB6128F8D4BA4A28D29DEAA31C8"
+    },
+    {
+      "path": "vendor/libldac/src/ldaclib_api.c",
+      "sha256": "CD322C4C9061F4437F292BCE3E9C7FDC8C7F3E4959725D9EC602A41ABC6BF5E9"
+    },
+    {
+      "path": "vendor/libldac/src/ldaclib.c",
+      "sha256": "61837723B01712D035D2521F8FC2C6469F2F294F377A4CB9760AA995EE62C604"
+    },
+    {
+      "path": "vendor/libldac/src/ldaclib.h",
+      "sha256": "066A84876055D83E064BF45C1F877FF47371B906DA081DBCCF106FE45BB32C70"
+    },
+    {
+      "path": "vendor/libldac/src/mdct_fixp_ldac.c",
+      "sha256": "C2343524397CFDF084AABB3E7C4AD2AACA64788572DF373F767ED73BDC87BCE6"
+    },
+    {
+      "path": "vendor/libldac/src/mdct_ldac.c",
+      "sha256": "B7108C3353858373F933FB0223FD2C0E9C4A751B186CDD3893A30226EE5991FD"
+    },
+    {
+      "path": "vendor/libldac/src/memory_ldac.c",
+      "sha256": "A382D9046D0F13F93E9A8F92D2C77091002256D5650F25E106433CBF137A824F"
+    },
+    {
+      "path": "vendor/libldac/src/pack_ldac.c",
+      "sha256": "013B3C9E814E85722AFEF3B2A1878B42ADC4F5C5760A92F1E68731EF67420065"
+    },
+    {
+      "path": "vendor/libldac/src/proto_ldac.h",
+      "sha256": "6BF302CC5B117A265DACC87463D097BE5BB452E67C0FE7EFDE4C65824BAC7E6A"
+    },
+    {
+      "path": "vendor/libldac/src/quant_fixp_ldac.c",
+      "sha256": "6B3BADF0974E34F0B746F70A76AE0F290ED7DE1F77A14B3ED08E730943884DF1"
+    },
+    {
+      "path": "vendor/libldac/src/quant_ldac.c",
+      "sha256": "8138B5F8700FAC655FFB5074DB6F63A4349ABDBD1693572671C04C3598514818"
+    },
+    {
+      "path": "vendor/libldac/src/setpcm_fixp_ldac.c",
+      "sha256": "0294C3712E8F191473EAEAA2961B9FFD310A47FF3AEF9B9BFBDC572519868616"
+    },
+    {
+      "path": "vendor/libldac/src/setpcm_ldac.c",
+      "sha256": "A3345A96AAA5715FEDED2E0E76C14B9750B9060467F7DE342EE85E18D08CE973"
+    },
+    {
+      "path": "vendor/libldac/src/sigana_fixp_ldac.c",
+      "sha256": "D5A47FD932241B061ACCCA7E6F6B96128DC85A6ABB839550D95B94A671F501CE"
+    },
+    {
+      "path": "vendor/libldac/src/sigana_ldac.c",
+      "sha256": "936910436E1FBE71DD18D5A688A9ABB303FE83EA66C3FB01EBFBE4C14A280A0F"
+    },
+    {
+      "path": "vendor/libldac/src/struct_ldac.h",
+      "sha256": "9BE6701EF6C522A3D503FE9A5C6680F98E4C2E5B3864CC232922444A8F1D1798"
+    },
+    {
+      "path": "vendor/libldac/src/tables_ldac.c",
+      "sha256": "39C6977BE7F76985892FACE51A1BCF7C45BF7A8870851D3954C1E7328D209D99"
+    },
+    {
+      "path": "vendor/libldac/src/tables_sigproc_fixp_ldac.c",
+      "sha256": "88544B93E9F876E03F562D64091D5A9FD0B5F3CFE0BA1C717C54BB5F644E40C8"
+    },
+    {
+      "path": "vendor/libldac/src/tables_sigproc_ldac.c",
+      "sha256": "BC85F80FAFB79BF9A2A0D6D43BE0949E543D58D8A8F82CD4AE153E95B067E909"
+    },
+    {
+      "path": "tools/player.c",
+      "sha256": "F4FB9F6D4EBD098B7700330F83FB35F5B4EADD1D7E2D8E99DF8B75D795CA4DAD"
+    },
+    {
+      "path": "tools/build-zig.ps1",
+      "sha256": "6A8317C808B2DF60DA616E66441869AD14CA76EE548D53D464966591B295EBF0"
+    },
+    {
+      "path": "CMakeLists.txt",
+      "sha256": "9CF5AFC4FDBCB1F4B0C338B4907BABD8FB2377628EC16E08534A83D63CF995A7"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "330A678BE19E4839CDBB669270BB2E27392B4918D658FFF1D09628AEE01E71D8"
+    }
+  ],
+  "build_input_hashes_are_worktree_bytes": true,
+  "receiver_playout_verified": false,
+  "remote_l2cap_close_verified": false,
+  "restored_clean_guest": {
+    "captured_utc": "2026-11-06T07:40:54.8405786Z",
+    "admin": true,
+    "secure_boot": true,
+    "project_service_count": 0,
+    "project_audio_service_count": 0,
+    "project_marker": false,
+    "project_test_certificate_count": 0,
+    "bcd_test_or_debug_enabled": false,
+    "verifier_runtime_no_drivers": true,
+    "verifier_runtime_exit": 0,
+    "clean_passed": true
+  },
+  "final_vm_state": {
+    "forced_shutdown": false,
+    "snapshot_preserved": true,
+    "fresh_clean_passed": true,
+    "normal_final_shutdown": true,
+    "state": "poweroff",
+    "captured_utc": "2026-11-06T07:42:05.7717384Z"
+  },
+  "initial_clean_check_timeout": {
+    "controller_timeout_ms": 45000,
+    "result_file_absent_after_timeout": true,
+    "original_stall_stage_confirmed": false,
+    "retry_added_stage_logs_and_cim_timeout_seconds": 10,
+    "retry_controller_timeout_ms": 120000,
+    "retry_passed": true
+  }
+}

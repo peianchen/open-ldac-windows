@@ -341,6 +341,9 @@ static int native_stopped(void *context) {
     if(!io)return 1;
     error=stopped_error(io);if(error)io->last_error=error;return error!=0;
 }
+static uint64_t native_now_ms(void *context) {
+    (void)context;return (uint64_t)GetTickCount64();
+}
 static unsigned native_requested(void *context) {
     wl_win_native_io *io=(wl_win_native_io *)context;
     return io && io->requested?(unsigned)InterlockedExchange(io->requested,0):0;
@@ -393,7 +396,7 @@ void wl_win_native_bind(wl_win_native_io *io,wl_playback_io *out) {
     memset(out,0,sizeof(*out));if(!io)return;
     out->context=io;out->open=native_open;out->send=native_send;out->receive=native_receive;
     out->wait_samples=native_wait_samples;out->finish_media=native_finish_media;out->stopped=native_stopped;
-    out->requested_bitrate=native_requested;out->close=native_close;
+    out->requested_bitrate=native_requested;out->close=native_close;out->now_ms=native_now_ms;
 }
 void wl_win_native_destroy(wl_win_native_io *io) {
     if(!io)return;

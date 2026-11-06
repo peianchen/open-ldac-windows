@@ -73,8 +73,10 @@ claiming a hard bound on a lower driver's completion time.
 
 A persistent signaling read watches streaming waits/media sends. This subset
 fails closed on an unsolicited packet or signaling-channel loss; it does not
-yet implement peer-initiated SUSPEND/RECONFIGURE, fragmented signaling or full
-AVDTP interoperability. The pending read is reused for normal EOF signaling,
+yet implement peer-initiated SUSPEND/RECONFIGURE or full AVDTP interoperability.
+Incoming transaction responses can now be reassembled within the bounded
+[signaling reassembly contract](SIGNALING_REASSEMBLY.md); unsolicited streaming
+traffic still fails closed. The pending read is reused for normal EOF signaling,
 and drained before closing the signaling handle. The existing four-bit wire
 label limitation remains documented in [the session contract](AVDTP_SESSION.md).
 
@@ -128,3 +130,12 @@ Primary contracts: [L2CAP client](https://learn.microsoft.com/en-us/windows-hard
 [CancelIoEx](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex),
 [service control](https://learn.microsoft.com/en-us/windows/win32/services/service-control-handler-function),
 [waitable timers](https://learn.microsoft.com/en-us/windows/win32/sync/using-waitable-timer-objects).
+
+## One deadline per signaling transaction
+
+The required `now_ms` adapter callback uses Windows GetTickCount64. Each outgoing
+command and all response fragments share one 5,000 ms budget. Each receive gets
+only the remaining time; progress never renews the deadline. A response observed
+at or after the deadline is rejected even when complete. Stop takes precedence.
+This bounds protocol waiting, not an uncooperative lower driver's cancellation
+retirement, which still must be drained before storage can be released.

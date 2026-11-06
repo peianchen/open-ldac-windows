@@ -6,7 +6,8 @@ Traditional Chinese: [research background](docs/RESEARCH_BACKGROUND.zh-TW.md),
 [development tutorial](docs/DEVELOPMENT_GUIDE.zh-TW.md),
 [development journal](docs/DEVELOPMENT_JOURNAL.zh-TW.md), and
 [executed kernel-lab record](docs/validation/KERNEL_LAB_2026-11-01.md).
-Latest: [completion-aware sender drain and normal CLOSE, 2026-11-06](docs/validation/GRACEFUL_CLOSE_2026-11-06.md).
+Latest: [bounded signaling reassembly and transaction deadlines](docs/validation/SIGNALING_REASSEMBLY_2026-11-06.md).
+Previous: [completion-aware sender drain and normal CLOSE, 2026-11-06](docs/validation/GRACEFUL_CLOSE_2026-11-06.md).
 Previous: [native channel/audio-worker implementation and executed VM tests, 2026-11-04](docs/validation/PLAYBACK_USERMODE_2026-11-04.md).
 Previous: [observed WDF low-resource failures and recovery](docs/validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
 Previous: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](docs/validation/KERNEL_LAB_2026-11-03.md).

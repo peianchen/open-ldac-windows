@@ -29,6 +29,9 @@ typedef struct {
      * Never derive it from AC/battery state. */
     unsigned (*requested_bitrate)(void *);
     void (*close)(void *, unsigned channel);
+    /* Required monotonic milliseconds; one signaling transaction shares one
+     * deadline across send, all fragments and unmatched responses. */
+    uint64_t (*now_ms)(void *);
 } wl_playback_io;
 typedef struct {
     void *context;

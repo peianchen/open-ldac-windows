@@ -44,7 +44,8 @@ pending response. Payload shape is checked before acceptance. Unknown/stale
 response tuples do not advance state. Capacity/NULL failures during command
 construction preserve state, transaction counters and output tokens.
 
-Malformed matching responses, peer commands, fragments, matching reject,
+Malformed matching responses, peer commands, raw fragments passed directly to
+the complete-message session API, matching reject,
 timeout and send/transport failure terminate this subset. It does not attempt
 interoperability recovery by guessing peer state. The owner must close/retire
 the old channels before initializing with a strictly higher generation.
@@ -78,11 +79,13 @@ response before matching its tuple could invalidate live work. The implementatio
 now matches a readable single-packet response header before validating a matching
 payload. Regressions require unrelated traffic to leave the session byte-for-byte
 unchanged; a matching oversized packet still invalidates transport. Short headers,
-fragments and peer commands keep the explicitly unsupported/fail-closed behavior.
+raw fragments passed directly to the session and peer commands keep the
+explicitly unsupported/fail-closed behavior. Playback now reassembles incoming
+transaction fragments in a separate framing layer before calling this API.
 
 The next integration must provide asynchronous signaling I/O and separate media
 channel lifetime, cancellation/deadline ownership, actual peer packet traces and
-an explicit teardown path. Peer-initiated commands, fragmented signaling,
+an explicit teardown path. Peer-initiated commands and interleaved signaling,
 peer-initiated closure/reconfiguration/content protection and interoperability still
 require development before claiming a complete AVDTP implementation. Windows
 PCM endpoint/service, real PnP/sleep behavior, signing/restore and quality/power
@@ -109,3 +112,13 @@ sections 4.3.1.14 and 4.3.1.43, specifies acceptance before media release and th
 rejection format. These implementation tests do not constitute SIG qualification.
 Executed current tests and remaining gates are in the
 [dated report](validation/GRACEFUL_CLOSE_2026-11-06.md).
+
+## Receive framing boundary (2026-11-06)
+
+The session API still consumes complete normalized SINGLE messages. Raw fragments
+passed directly to it remain unsupported. The playback transaction owner now
+uses a separate [bounded reassembler](SIGNALING_REASSEMBLY.md) before calling
+`wl_avdtp_session_receive`; this enables fragmented discovery/capability responses
+without making the session own buffers, clocks or asynchronous I/O. Unmatched
+complete response tuples are still filtered before semantic parsing. An active
+fragment sequence cannot be interleaved with another message in this subset.

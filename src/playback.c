@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "playback.h"
+#include "avdtp_reassembly.h"
 #include <string.h>
 
 #define WL_PLAY_MAX_MTU 1008u
 #define WL_PLAY_MIN_MTU 48u
 #define WL_PLAY_TIMEOUT_MS 5000u
 #define WL_PLAY_MAX_UNMATCHED 16u
+#define WL_PLAY_MAX_WIRE_PACKETS 64u
 #define WL_PLAY_MAX_SETUP (WL_AVDTP_SESSION_MAX_SEPS + 8u)
 
 static unsigned sample_bytes(LDACBT_SMPL_FMT_T format) {
@@ -32,38 +34,71 @@ static int valid_mtu(unsigned out, unsigned in, int media) {
     return out >= (media ? 679u : WL_PLAY_MIN_MTU) && out <= WL_PLAY_MAX_MTU &&
         in >= WL_PLAY_MIN_MTU && in <= WL_PLAY_MAX_MTU;
 }
+static int exchange_timeout(wl_avdtp_session *s,
+                            const wl_avdtp_session_token *token,
+                            wl_playback_report *r) {
+    (void)wl_avdtp_session_timeout(s, token);
+    return protocol_failure(r, WL_AVDTP_SESSION_TIMEOUT);
+}
+static unsigned remaining_ms(const wl_playback_io *io, uint64_t started) {
+    /* A clock earlier than the transaction start fails closed by unsigned
+     * subtraction. The adapter contract requires all readings monotonic. */
+    uint64_t elapsed = io->now_ms(io->context) - started;
+    return elapsed >= WL_PLAY_TIMEOUT_MS ? 0u : WL_PLAY_TIMEOUT_MS - (unsigned)elapsed;
+}
 static int exchange(const wl_playback_io *io, wl_avdtp_session *s,
                     unsigned in_mtu, wl_playback_report *r) {
-    uint8_t command[18], response[WL_AVDTP_SESSION_MAX_PACKET];
+    uint8_t command[18], response[WL_PLAY_MAX_MTU];
+    wl_avdtp_reassembly assembly;
     wl_avdtp_session_token token;
+    uint64_t started;
     size_t size;
+    unsigned unmatched = 0;
     int result;
     r->stage = (unsigned)s->state;
     if (stopped(io)) return WL_PLAY_STOPPED;
     size = wl_avdtp_session_next_command(s, command, sizeof(command), &token);
     if (!size) return protocol_failure(r, s->last_error ? s->last_error : WL_AVDTP_SESSION_INVALID_STATE);
+    wl_avdtp_reassembly_reset(&assembly);
+    started = io->now_ms(io->context);
     if (io->send(io->context, WL_SIGNALING, command, size, WL_PLAY_TIMEOUT_MS)) {
         result = io_failure(io);
         if (result != WL_PLAY_STOPPED) r->protocol_error = wl_avdtp_session_send_failed(s, &token);
         return result;
     }
-    for (unsigned i = 0; i < WL_PLAY_MAX_UNMATCHED; ++i) {
-        size_t received = 0;
+    for (unsigned i = 0; i < WL_PLAY_MAX_WIRE_PACKETS; ++i) {
+        const uint8_t *message = NULL;
+        size_t received = 0, message_size = 0;
+        unsigned remaining;
         if (stopped(io)) return WL_PLAY_STOPPED;
-        if (io->receive(io->context, WL_SIGNALING, response, in_mtu, &received, WL_PLAY_TIMEOUT_MS)) {
+        remaining = remaining_ms(io, started);
+        if (!remaining) return exchange_timeout(s, &token, r);
+        if (io->receive(io->context, WL_SIGNALING, response, in_mtu, &received, remaining)) {
             result = io_failure(io);
             if (result != WL_PLAY_STOPPED)
                 r->protocol_error = wl_avdtp_session_transport_failed(s, s->generation);
             return result;
         }
         if (stopped(io)) return WL_PLAY_STOPPED;
-        if (received > in_mtu) return protocol_failure(r, WL_AVDTP_SESSION_MALFORMED);
-        result = wl_avdtp_session_receive(s, s->generation, response, received);
-        if (result == WL_AVDTP_SESSION_UNMATCHED_RESPONSE) continue;
+        if (!remaining_ms(io, started)) return exchange_timeout(s, &token, r);
+        if (received > in_mtu) {
+            (void)wl_avdtp_session_transport_failed(s, s->generation);
+            return protocol_failure(r, WL_AVDTP_SESSION_MALFORMED);
+        }
+        result = wl_avdtp_reassembly_push(&assembly, response, received, &message, &message_size);
+        if (result == WL_AVDTP_REASSEMBLY_MORE) continue;
+        if (result != WL_AVDTP_REASSEMBLY_COMPLETE) {
+            (void)wl_avdtp_session_transport_failed(s, s->generation);
+            return protocol_failure(r, WL_AVDTP_SESSION_MALFORMED);
+        }
+        result = wl_avdtp_session_receive(s, s->generation, message, message_size);
+        if (result == WL_AVDTP_SESSION_UNMATCHED_RESPONSE) {
+            if (++unmatched >= WL_PLAY_MAX_UNMATCHED) return exchange_timeout(s, &token, r);
+            continue;
+        }
         return result ? protocol_failure(r, result) : WL_PLAY_OK;
     }
-    (void)wl_avdtp_session_timeout(s, &token);
-    return protocol_failure(r, WL_AVDTP_SESSION_TIMEOUT);
+    return exchange_timeout(s, &token, r);
 }
 static int drive(const wl_playback_io *io, wl_avdtp_session *s,
                  wl_avdtp_session_state goal, unsigned in_mtu,
@@ -128,7 +163,7 @@ int wl_playback_run(const wl_playback_io *io, const wl_pcm_source *source,
     if (!report) return WL_PLAY_ARGUMENT;
     memset(report, 0, sizeof(*report)); report->result = WL_PLAY_ARGUMENT;
     if (!io || !source || !options || !io->open || !io->send || !io->receive ||
-        !io->wait_samples || !io->finish_media || !io->stopped || !io->close || !source->read ||
+        !io->now_ms || !io->wait_samples || !io->finish_media || !io->stopped || !io->close || !source->read ||
         !(bytes = sample_bytes(source->format)) || !wl_bitrate_kbps(source->rate, LDACBT_EQMID_HQ))
         return WL_PLAY_ARGUMENT;
     report->requested_kbps = options->bitrate_kbps ? options->bitrate_kbps : wl_bitrate_kbps(source->rate, LDACBT_EQMID_HQ);

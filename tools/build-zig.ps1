@@ -16,13 +16,15 @@ try {
     $env:ZIG_LOCAL_CACHE_DIR = Join-Path $buildRoot '.zig-local-cache'
     $common = @('cc','-target','x86_64-windows-gnu','-mcpu=baseline',
         '-std=c11','-O2','-Wall','-Wextra','-Iinclude','-Ivendor/libldac/inc',
-        'src/wldac.c','src/avdtp.c','src/avdtp_session.c','vendor/libldac/src/ldaclib.c','vendor/libldac/src/ldacBT.c')
+        'src/wldac.c','src/avdtp.c','src/avdtp_session.c','src/avdtp_reassembly.c','vendor/libldac/src/ldaclib.c','vendor/libldac/src/ldacBT.c')
     & $compiler @common 'tools/cli.c' '-o' (Join-Path $buildRoot 'wldac_cli.exe')
     if ($LASTEXITCODE -ne 0) { throw 'CLI compilation failed' }
     & $compiler @common 'tests/core_tests.c' '-o' (Join-Path $buildRoot 'core_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed' }
     & $compiler @common 'tests/avdtp_session_tests.c' '-o' (Join-Path $buildRoot 'avdtp_session_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'AVDTP session test compilation failed' }
+    & $compiler @common 'tests/avdtp_reassembly_tests.c' '-o' (Join-Path $buildRoot 'avdtp_reassembly_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'AVDTP reassembly compilation failed' }
     & $compiler @common 'tools/native_probe.c' '-lsetupapi' '-o' (Join-Path $buildRoot 'wldac_probe.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Native probe compilation failed' }
     $play = $common + @('src/playback.c', 'src/wav_source.c')
@@ -46,7 +48,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & (Join-Path $buildRoot 'avdtp_session_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'AVDTP session tests failed' }
-    foreach ($name in @('playback_tests','wav_source_tests','native_io_tests')) {
+    foreach ($name in @('avdtp_reassembly_tests','playback_tests','wav_source_tests','native_io_tests')) {
         & (Join-Path $buildRoot ($name+'.exe'))
         if ($LASTEXITCODE -ne 0) { throw "$name failed" }
     }

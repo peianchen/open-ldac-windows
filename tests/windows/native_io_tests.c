@@ -228,6 +228,9 @@ static int terminal_drain_tests(void) {
     CHECK(terminal_target(0,0,0,10000000,&target)==ERROR_INVALID_PARAMETER);
     CHECK(make_pipe(&p)==0);
     wl_win_native_bind(p.io,&bound);CHECK(bound.finish_media==native_finish_media);
+    CHECK(bound.now_ms!=NULL);
+    { uint64_t before=GetTickCount64(),actual=bound.now_ms(p.io),after=GetTickCount64();
+      CHECK(actual>=before&&actual<=after); }
     CHECK(native_finish_media(p.io,0,0,123)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
     CHECK(native_finish_media(p.io,1,0,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_STATE);
     CHECK(native_finish_media(p.io,0,0,48000)==0);
