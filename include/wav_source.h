@@ -17,5 +17,7 @@ typedef struct {
 /* UTF-8 path on Windows (converted strictly to UTF-16), native bytes elsewhere.
  * Returns zero on success. On failure the object remains closed. */
 int wl_wav_open(wl_wav_source *, const char *utf8_path);
+/* Rewind the same open read-only file to its PCM start. No path reopen/write. */
+int wl_wav_rewind(wl_wav_source *);
 void wl_wav_close(wl_wav_source *);
 #endif

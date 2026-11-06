@@ -27,6 +27,9 @@ struct wl_win_native_io {
     uint8_t monitor_buffer[OL_MAX_PACKET];
     unsigned out_mtu[2], in_mtu[2];
     int monitor_armed, clock_started, media_written, media_finished;
+    int wait_pending, clock_paused;
+    uint64_t pending_offset;
+    LARGE_INTEGER pause_started;
     LARGE_INTEGER frequency, anchor, last_media_completion;
     uint64_t last_offset;
     unsigned clock_rate;
@@ -153,18 +156,46 @@ static DWORD arm_monitor(wl_win_native_io *io) {
     io->monitor_armed=1;
     return error==ERROR_IO_PENDING?ERROR_SUCCESS:error;
 }
-static DWORD monitor_error(wl_win_native_io *io) {
-    DWORD wait,error;
-    if(!io->monitor_armed)return ERROR_SUCCESS;
-    wait=WaitForSingleObject(io->monitor.ov.hEvent,0);
-    if(wait==WAIT_TIMEOUT)return ERROR_SUCCESS;
-    if(wait==WAIT_FAILED)return GetLastError();
+/* A completed monitor owns one immutable SDU until native_receive retires it.
+ * Readiness is not disconnect: only EOF, bad counts or an OS error fail. */
+static int native_poll_control(void *context,unsigned timeout_ms) {
+    wl_win_native_io *io=(wl_win_native_io *)context;DWORD wait,error;HANDLE events[2];
+    if(!io)return -1;
+    if((error=stopped_error(io))!=0 || (error=arm_monitor(io))!=0)return result(io,error);
+    events[0]=io->stop;events[1]=io->monitor.ov.hEvent;
+    wait=WaitForMultipleObjects(2,events,FALSE,timeout_ms);
+    if(wait==WAIT_OBJECT_0)return result(io,ERROR_OPERATION_ABORTED);
+    if(wait==WAIT_TIMEOUT)return result(io,ERROR_SUCCESS);
+    if(wait==WAIT_FAILED)return result(io,GetLastError());
     error=slot_finish(io->handles[WL_SIGNALING],&io->monitor,0);
-    if(error==ERROR_IO_INCOMPLETE)return ERROR_SUCCESS;
-    /* This subset does not dispatch unsolicited signaling commands/responses
-     * while streaming. Any packet, zero-byte EOF or transport error is fatal;
-     * a future owner-thread remote-command policy may route these packets. */
-    return error?error:ERROR_CONNECTION_ABORTED;
+    if(error==ERROR_IO_INCOMPLETE)return result(io,ERROR_SUCCESS);
+    if(!error && !io->monitor.bytes)error=ERROR_CONNECTION_ABORTED;
+    if(!error && (io->monitor.bytes>io->in_mtu[WL_SIGNALING] || io->monitor.bytes>OL_MAX_PACKET))
+        error=ERROR_INVALID_DATA;
+    if(!error)error=stopped_error(io);
+    if(error)return result(io,error);
+    io->last_error=ERROR_SUCCESS;return WL_PLAY_IO_CONTROL;
+}
+static DWORD monitor_error(wl_win_native_io *io) {
+    return native_poll_control(io,0)<0?io->last_error:ERROR_SUCCESS;
+}
+static int native_pause_clock(void *context,int paused) {
+    wl_win_native_io *io=(wl_win_native_io *)context;LARGE_INTEGER now;LONGLONG elapsed;DWORD error;
+    if(!io)return -1;
+    if(paused!=0 && paused!=1)return result(io,ERROR_INVALID_PARAMETER);
+    if((error=stopped_error(io))!=0)return result(io,error);
+    if(paused==io->clock_paused)return result(io,ERROR_SUCCESS);
+    if(!QueryPerformanceCounter(&now))return result(io,ERROR_GEN_FAILURE);
+    if(paused) {io->pause_started=now;io->clock_paused=1;return result(io,ERROR_SUCCESS);}
+    if(now.QuadPart<io->pause_started.QuadPart)return result(io,ERROR_INVALID_DATA);
+    elapsed=now.QuadPart-io->pause_started.QuadPart;
+    if(io->clock_started && (io->anchor.QuadPart<0 || io->anchor.QuadPart>LLONG_MAX-elapsed))
+        return result(io,ERROR_ARITHMETIC_OVERFLOW);
+    if(io->media_written && (io->last_media_completion.QuadPart<0 ||
+       io->last_media_completion.QuadPart>LLONG_MAX-elapsed))return result(io,ERROR_ARITHMETIC_OVERFLOW);
+    if(io->clock_started)io->anchor.QuadPart+=elapsed;
+    if(io->media_written)io->last_media_completion.QuadPart+=elapsed;
+    io->clock_paused=0;return result(io,ERROR_SUCCESS);
 }
 static int native_open(void *context,unsigned channel,unsigned *out_mtu,unsigned *in_mtu) {
     wl_win_native_io *io=(wl_win_native_io *)context;DWORD error,bytes;
@@ -196,17 +227,19 @@ static int native_open(void *context,unsigned channel,unsigned *out_mtu,unsigned
     return result(io,ERROR_SUCCESS);
 }
 static int native_send(void *context,unsigned channel,const uint8_t *packet,size_t length,unsigned timeout) {
-    wl_win_native_io *io=(wl_win_native_io *)context;DWORD bytes,error;HANDLE peer=NULL;
+    wl_win_native_io *io=(wl_win_native_io *)context;DWORD bytes,error;
     if(!io || channel>WL_MEDIA || !packet || !length || length>OL_MAX_PACKET)return io?result(io,ERROR_INVALID_PARAMETER):-1;
     if(io->handles[channel]==INVALID_HANDLE_VALUE)return result(io,ERROR_INVALID_HANDLE);
     if(length>io->out_mtu[channel])return result(io,ERROR_BAD_LENGTH);
     if(channel==WL_MEDIA) {
-        if(io->media_finished)return result(io,ERROR_INVALID_STATE);
-        if((error=arm_monitor(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
-        peer=io->monitor.ov.hEvent;
+        if(io->media_finished || io->clock_paused)return result(io,ERROR_INVALID_STATE);
+        if((error=monitor_error(io))!=0)return result(io,error);
+        /* Finish one bounded in-flight write before dispatching peer control.
+         * Cancelling on signaling readiness would make successful delivery
+         * ambiguous and a subsequent retry could duplicate audio. */
     }
     error=native_perform(io,io->handles[channel],&io->operations[channel],NATIVE_WRITE,
-          0,packet,(DWORD)length,NULL,0,&bytes,timeout,peer);
+          0,packet,(DWORD)length,NULL,0,&bytes,timeout,NULL);
     if(!error)error=exact_write_result(bytes,length);
     if(!error && channel==WL_MEDIA) {
         if(!QueryPerformanceCounter(&io->last_media_completion))error=ERROR_GEN_FAILURE;
@@ -245,26 +278,29 @@ static DWORD clock_target(wl_win_native_io *io,uint64_t offset,unsigned rate,LON
     *target=io->anchor.QuadPart+(LONGLONG)(whole+fraction);return ERROR_SUCCESS;
 }
 static int native_wait_samples(void *context,uint64_t offset,unsigned rate) {
-    wl_win_native_io *io=(wl_win_native_io *)context;LARGE_INTEGER now,due;LONGLONG target;DWORD error,wait;
+    wl_win_native_io *io=(wl_win_native_io *)context;LARGE_INTEGER now,due;LONGLONG target;DWORD error,wait;int control;
     HANDLE events[3];
     if(!io || (rate!=44100 && rate!=48000 && rate!=88200 && rate!=96000))return io?result(io,ERROR_INVALID_PARAMETER):-1;
     if((error=stopped_error(io))!=0)return result(io,error);
+    if(io->clock_paused || io->media_finished)return result(io,ERROR_INVALID_STATE);
+    if(io->wait_pending && offset!=io->pending_offset)return result(io,ERROR_INVALID_PARAMETER);
     if(!io->clock_started) {
         if(offset!=0)return result(io,ERROR_INVALID_PARAMETER);
         if(!QueryPerformanceCounter(&io->anchor))return result(io,ERROR_GEN_FAILURE);
         io->clock_started=1;io->clock_rate=rate;io->last_offset=0;
-    } else if(rate!=io->clock_rate || offset<=io->last_offset)return result(io,ERROR_INVALID_PARAMETER);
-    if((error=arm_monitor(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
+    } else if(rate!=io->clock_rate || (!io->wait_pending && offset<=io->last_offset))return result(io,ERROR_INVALID_PARAMETER);
+    io->wait_pending=1;io->pending_offset=offset;
+    control=native_poll_control(io,0);if(control)return control;
     if((error=clock_target(io,offset,rate,&target))!=0)return result(io,error);
     events[0]=io->stop;events[1]=io->monitor.ov.hEvent;events[2]=io->timer;
     for(;;) {
         long double remaining;
-        if((error=stopped_error(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
+        control=native_poll_control(io,0);if(control)return control;
         if(!QueryPerformanceCounter(&now))return result(io,ERROR_GEN_FAILURE);
         if(now.QuadPart>=target) {
             if((long double)(now.QuadPart-target)*1000.0L>(long double)io->frequency.QuadPart*40.0L)
                 return result(io,ERROR_TIMEOUT);
-            io->last_offset=offset;return result(io,ERROR_SUCCESS);
+            io->last_offset=offset;io->wait_pending=0;return result(io,ERROR_SUCCESS);
         }
         remaining=(long double)(target-now.QuadPart)*10000000.0L/(long double)io->frequency.QuadPart;
         if(remaining>=(long double)LLONG_MAX-1)return result(io,ERROR_ARITHMETIC_OVERFLOW);
@@ -273,7 +309,8 @@ static int native_wait_samples(void *context,uint64_t offset,unsigned rate) {
         wait=WaitForMultipleObjects(3,events,FALSE,INFINITE);
         if(wait==WAIT_OBJECT_0)return result(io,ERROR_OPERATION_ABORTED);
         if(wait==WAIT_OBJECT_0+1) {
-            error=monitor_error(io);return result(io,error?error:ERROR_CONNECTION_ABORTED);
+            control=native_poll_control(io,0);if(control)return control;
+            return result(io,ERROR_GEN_FAILURE);
         }
         if(wait!=WAIT_OBJECT_0+2)return result(io,wait==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE);
         /* Recheck the absolute QPC deadline after every timer wake; rounding
@@ -299,12 +336,12 @@ static DWORD terminal_target(LONGLONG anchor,uint64_t samples,unsigned rate,
 static int native_finish_media(void *context,uint64_t end_offset,
                                unsigned final_packet_samples,unsigned rate) {
     wl_win_native_io *io=(wl_win_native_io *)context;
-    LARGE_INTEGER now,due;LONGLONG target,completion_target;DWORD error,wait;
+    LARGE_INTEGER now,due;LONGLONG target,completion_target;DWORD error,wait;int control;
     HANDLE events[3];
     if(!io || (rate!=44100 && rate!=48000 && rate!=88200 && rate!=96000))
         return io?result(io,ERROR_INVALID_PARAMETER):-1;
     if((error=stopped_error(io))!=0)return result(io,error);
-    if(io->media_finished)return result(io,ERROR_INVALID_STATE);
+    if(io->media_finished || io->clock_paused)return result(io,ERROR_INVALID_STATE);
     if(!io->media_written) {
         if(end_offset || final_packet_samples || io->clock_started)return result(io,ERROR_INVALID_STATE);
         io->media_finished=1;return result(io,ERROR_SUCCESS);
@@ -317,11 +354,11 @@ static int native_finish_media(void *context,uint64_t end_offset,
        (error=terminal_target(io->last_media_completion.QuadPart,final_packet_samples,rate,
                               io->frequency.QuadPart,&completion_target))!=0)return result(io,error);
     if(completion_target>target)target=completion_target;
-    if((error=arm_monitor(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
+    control=native_poll_control(io,0);if(control)return control;
     events[0]=io->stop;events[1]=io->monitor.ov.hEvent;events[2]=io->timer;
     for(;;) {
         long double remaining;
-        if((error=stopped_error(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
+        control=native_poll_control(io,0);if(control)return control;
         if(!QueryPerformanceCounter(&now))return result(io,ERROR_GEN_FAILURE);
         if(now.QuadPart>=target){io->media_finished=1;return result(io,ERROR_SUCCESS);}
         remaining=(long double)(target-now.QuadPart)*10000000.0L/(long double)io->frequency.QuadPart;
@@ -331,7 +368,8 @@ static int native_finish_media(void *context,uint64_t end_offset,
         wait=WaitForMultipleObjects(3,events,FALSE,INFINITE);
         if(wait==WAIT_OBJECT_0)return result(io,ERROR_OPERATION_ABORTED);
         if(wait==WAIT_OBJECT_0+1) {
-            error=monitor_error(io);return result(io,error?error:ERROR_CONNECTION_ABORTED);
+            control=native_poll_control(io,0);if(control)return control;
+            return result(io,ERROR_GEN_FAILURE);
         }
         if(wait!=WAIT_OBJECT_0+2)return result(io,wait==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE);
     }
@@ -360,7 +398,7 @@ static void native_close(void *context,unsigned channel) {
         slot_cancel_drain(io->handles[channel],&io->operations[channel]);
         CloseHandle(io->handles[channel]);io->handles[channel]=INVALID_HANDLE_VALUE;
     }
-    if(channel==WL_MEDIA){(void)CancelWaitableTimer(io->timer);io->clock_started=0;io->last_offset=0;io->media_written=0;io->media_finished=0;}
+    if(channel==WL_MEDIA){(void)CancelWaitableTimer(io->timer);io->clock_started=0;io->last_offset=0;io->media_written=0;io->media_finished=0;io->wait_pending=0;io->clock_paused=0;}
     io->out_mtu[channel]=io->in_mtu[channel]=0;
 }
 wl_win_native_io *wl_win_native_create(unsigned index,const wchar_t *path,HANDLE stop,volatile LONG *requested) {
@@ -397,6 +435,7 @@ void wl_win_native_bind(wl_win_native_io *io,wl_playback_io *out) {
     out->context=io;out->open=native_open;out->send=native_send;out->receive=native_receive;
     out->wait_samples=native_wait_samples;out->finish_media=native_finish_media;out->stopped=native_stopped;
     out->requested_bitrate=native_requested;out->close=native_close;out->now_ms=native_now_ms;
+    out->poll_control=native_poll_control;out->pause_clock=native_pause_clock;
 }
 void wl_win_native_destroy(wl_win_native_io *io) {
     if(!io)return;

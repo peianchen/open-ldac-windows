@@ -281,3 +281,117 @@ int wl_avdtp_session_transport_failed(wl_avdtp_session *s, uint64_t generation) 
     int result = epoch(s, generation);
     return result ? result : fail(s, WL_AVDTP_SESSION_TRANSPORT_FAILED);
 }
+
+/* AVDTP 1.3 sections 8.13-8.18 and 8.20.6. The application supports one
+ * configured local SEP; it deliberately does not partially apply SEP lists. */
+int wl_avdtp_session_peer_prepare(const wl_avdtp_session *s, uint64_t generation,
+                                  const uint8_t *packet, size_t size,
+                                  wl_avdtp_peer_reply *reply) {
+    wl_avdtp_peer_reply prepared = {0};
+    uint8_t signal, seid, error = 0;
+    int result;
+    if (!reply) return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+    memset(reply, 0, sizeof(*reply));
+    result = epoch(s, generation);
+    if (result) return result;
+    if (s->pending) return WL_AVDTP_SESSION_BUSY;
+    if (!s->configured || (s->state != WL_AVDTP_SESSION_STREAMING &&
+                           s->state != WL_AVDTP_SESSION_SUSPENDED))
+        return WL_AVDTP_SESSION_INVALID_STATE;
+    if (!packet || size < 2 || size > WL_AVDTP_SESSION_MAX_PACKET)
+        return WL_AVDTP_SESSION_MALFORMED;
+    if (packet[0] & 0x0cu) return WL_AVDTP_SESSION_UNSUPPORTED_FRAGMENT;
+    if ((packet[0] & 3u) != WL_AVDTP_COMMAND)
+        return WL_AVDTP_SESSION_UNMATCHED_RESPONSE;
+    if (s->serial == UINT64_MAX) return WL_AVDTP_SESSION_SEQUENCE_EXHAUSTED;
+    signal = packet[1] & 0x3fu;
+    prepared.generation = generation; prepared.serial = s->serial;
+    prepared.original_state = s->state;
+    prepared.bytes[0] = (uint8_t)((packet[0] & 0xf0u) | WL_AVDTP_ACCEPT);
+    prepared.bytes[1] = signal; prepared.size = 2;
+    switch (signal) {
+    case WL_AVDTP_START:
+    case WL_AVDTP_SUSPEND:
+    case WL_AVDTP_CLOSE:
+    case WL_AVDTP_ABORT:
+        if (size != 3) return WL_AVDTP_SESSION_MALFORMED;
+        seid = packet[2] >> 2; /* Incoming ACP SEID is our local assignment. */
+        if (seid != s->local_seid || !valid_seid(seid)) {
+            if (signal == WL_AVDTP_ABORT) return WL_AVDTP_SESSION_OK;
+            error = 0x12; /* BAD_ACP_SEID */
+        } else if ((signal == WL_AVDTP_START && s->state != WL_AVDTP_SESSION_SUSPENDED) ||
+                   (signal == WL_AVDTP_SUSPEND && s->state != WL_AVDTP_SESSION_STREAMING)) {
+            error = 0x31; /* BAD_STATE */
+        }
+        if (error) {
+            prepared.bytes[0] = (uint8_t)((packet[0] & 0xf0u) | WL_AVDTP_REJECT);
+            if (signal == WL_AVDTP_START || signal == WL_AVDTP_SUSPEND) {
+                prepared.bytes[2] = (uint8_t)(seid << 2);
+                prepared.bytes[3] = error; prepared.size = 4;
+            } else { prepared.bytes[2] = error; prepared.size = 3; }
+        } else {
+            prepared.action = signal == WL_AVDTP_START ? WL_AVDTP_PEER_START :
+                signal == WL_AVDTP_SUSPEND ? WL_AVDTP_PEER_SUSPEND :
+                signal == WL_AVDTP_CLOSE ? WL_AVDTP_PEER_CLOSE : WL_AVDTP_PEER_ABORT;
+        }
+        break;
+    default:
+        if (!signal || signal > 13) {
+            prepared.bytes[0] = (uint8_t)((packet[0] & 0xf0u) | WL_AVDTP_GENERAL_REJECT);
+        } else {
+            prepared.bytes[0] = (uint8_t)((packet[0] & 0xf0u) | WL_AVDTP_REJECT);
+            /* SET_CONFIGURATION and RECONFIGURE rejects include category. */
+            if (signal == WL_AVDTP_SET_CONFIGURATION || signal == 5) {
+                prepared.bytes[2] = 0; prepared.bytes[3] = 0x19; prepared.size = 4;
+            } else { prepared.bytes[2] = 0x19; prepared.size = 3; }
+        }
+        break;
+    }
+    *reply = prepared;
+    return WL_AVDTP_SESSION_OK;
+}
+
+int wl_avdtp_session_peer_commit(wl_avdtp_session *s,
+                                 const wl_avdtp_peer_reply *reply) {
+    wl_avdtp_session_state next;
+    int result;
+    if (!reply) return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+    result = epoch(s, reply->generation);
+    if (result) return result;
+    if (s->pending || !s->configured || s->serial != reply->serial ||
+        s->state != reply->original_state ||
+        (s->state != WL_AVDTP_SESSION_STREAMING && s->state != WL_AVDTP_SESSION_SUSPENDED))
+        return WL_AVDTP_SESSION_TOKEN_MISMATCH;
+    if (s->serial == UINT64_MAX) return WL_AVDTP_SESSION_SEQUENCE_EXHAUSTED;
+    if (reply->size < 2 || reply->size > sizeof(reply->bytes))
+        return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+    next = s->state;
+    switch (reply->action) {
+    case WL_AVDTP_PEER_NONE:
+        if ((reply->bytes[0] & 3u) != WL_AVDTP_REJECT &&
+            (reply->bytes[0] & 3u) != WL_AVDTP_GENERAL_REJECT)
+            return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+        break;
+    case WL_AVDTP_PEER_SUSPEND:
+        if (s->state != WL_AVDTP_SESSION_STREAMING || reply->bytes[1] != WL_AVDTP_SUSPEND)
+            return WL_AVDTP_SESSION_INVALID_STATE;
+        next = WL_AVDTP_SESSION_SUSPENDED; break;
+    case WL_AVDTP_PEER_START:
+        if (s->state != WL_AVDTP_SESSION_SUSPENDED || reply->bytes[1] != WL_AVDTP_START)
+            return WL_AVDTP_SESSION_INVALID_STATE;
+        next = WL_AVDTP_SESSION_STREAMING; break;
+    case WL_AVDTP_PEER_CLOSE:
+        if (reply->bytes[1] != WL_AVDTP_CLOSE) return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+        next = WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE; break;
+    case WL_AVDTP_PEER_ABORT:
+        if (reply->bytes[1] != WL_AVDTP_ABORT) return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+        next = WL_AVDTP_SESSION_ABORTED; break;
+    default: return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+    }
+    if (reply->action != WL_AVDTP_PEER_NONE &&
+        (reply->size != 2 || (reply->bytes[0] & 0x0fu) != WL_AVDTP_ACCEPT))
+        return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+    ++s->serial; s->state = next;
+    if (reply->action == WL_AVDTP_PEER_ABORT) { s->configured = 0; s->transport_valid = 0; }
+    return WL_AVDTP_SESSION_OK;
+}

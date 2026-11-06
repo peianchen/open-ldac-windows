@@ -112,7 +112,15 @@ static int valid_formats(void) {
         CHECK(source.pcm.read(source.pcm.context, output, 129, &count) != 0 && count == 0);
         CHECK(source.pcm.read(source.pcm.context, output, 0, &count) != 0 && count == 0);
         CHECK(source.pcm.read(source.pcm.context, output, 128, NULL) != 0);
+        CHECK(!wl_wav_rewind(&source));
+        CHECK(source.remaining_bytes == source.data_bytes);
+        CHECK(!source.pcm.read(source.pcm.context, output + 1, 128, &count) && count == 128);
+        CHECK(!memcmp(output + 1, bytes + 44, 128 * source.block_align));
+        CHECK(!wl_wav_rewind(&source)); /* Partial read also rewinds. */
+        CHECK(!source.pcm.read(source.pcm.context, output + 1, 128, &count) && count == 128);
+        CHECK(!memcmp(output + 1, bytes + 44, 128 * source.block_align));
         wl_wav_close(&source); wl_wav_close(&source);
+        CHECK(wl_wav_rewind(&source) != 0);
         CHECK(!delete_fixture(path));
     }
     return 0;
@@ -180,6 +188,7 @@ int main(void) {
     CHECK(wl_wav_open(NULL, "x") != 0);
     CHECK(wl_wav_open(&source, NULL) != 0);
     CHECK(wl_wav_open(&source, "") != 0);
+    CHECK(wl_wav_rewind(NULL) != 0);
     wl_wav_close(NULL);
     printf("wav_source_tests: %u checks passed (fixture files removed; no driver/RF).\n", checks);
     return 0;

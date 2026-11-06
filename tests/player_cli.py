@@ -26,7 +26,17 @@ def call(args, codes):
     return r
 
 
-call(['--help'], {0})
+help_text = call(['--help'], {0}).stderr
+assert '--reconnect-restart 0..3' in help_text and 'whole WAV restarts' in help_text
+checks += 1
+for value in ('4', '-1', 'x', '4294967296', ''):
+    call(['--play', 'unused.wav', '--reconnect-restart', value], {87})
+for value in ('0', '1', '2', '3'):
+    call(['--play', 'unused.wav', '--reconnect-restart', value], {87})  # still no connect consent
+call(['--reconnect-restart'], {87})
+call(['--inspect', 'unused.wav', '--reconnect-restart', '1'], {87})
+call(['--service-selftest', '--result', 'unused.json', '--reconnect-restart', '1'], {87})
+call(['--play', 'unused.wav', '--reconnect-restart', '1', '--reconnect-restart', '2'], {87})
 call([], {0,2})
 call(['--unknown'], {87})  # ERROR_INVALID_PARAMETER: malformed command line
 with tempfile.TemporaryDirectory(dir=root) as tmp:

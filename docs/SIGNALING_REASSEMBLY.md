@@ -69,3 +69,7 @@ was inspected for header sizes and empty-payload handling (observed blob
 `30f80a0c2fd152a604309bb2fbd231ff2f53731b`). The project implementation is separate;
 no BlueZ source body is vendored. The official test suite is not the core
 specification, and this work does not claim full conformance.
+
+## Peer-control continuation
+
+Established single-SEP peer SUSPEND/START/CLOSE/ABORT now use a separate prepare/commit path after reassembly. Optional bounded reconnect explicitly restarts WAV and preserves manual bitrate. See [design and limitations](PEER_CONTROL_RECONNECT.md). The response-only session API still rejects commands; setup and simultaneous local CLOSE collisions remain fail-closed. AVRCP and physical headset interoperability are unverified.

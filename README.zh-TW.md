@@ -1,5 +1,7 @@
 # Open LDAC Windows
 
+最新進度：[耳機主動控制與有界重連](docs/PEER_CONTROL_RECONNECT.md)、[隔離驗證](docs/validation/PEER_CONTROL_RECONNECT_2026-11-06.md)。AVRCP 按鍵與實際 XM6 播放仍待驗證。
+
 開發透過 Windows 原生藍牙堆疊播放 LDAC 的開源專案，將筆電的音質與耗電同時列為核心需求。
 
 **目前包含 M0 離線核心與驗證中的 M1 原生傳輸。隔離 VM 的合成核心基準與標準 Verifier 案例已通過；尚未在日用 Windows 安裝 LDAC 驅動，也未完成實機耳機播放或 Windows 音訊端點。**

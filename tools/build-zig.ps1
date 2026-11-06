@@ -27,7 +27,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'AVDTP reassembly compilation failed' }
     & $compiler @common 'tools/native_probe.c' '-lsetupapi' '-o' (Join-Path $buildRoot 'wldac_probe.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Native probe compilation failed' }
-    $play = $common + @('src/playback.c', 'src/wav_source.c')
+    & $compiler 'cc' '-target' 'x86_64-windows-gnu' '-mcpu=baseline' '-std=c11' '-O2' '-Wall' '-Wextra' '-Werror' '-Iinclude' '-Ivendor/libldac/inc' 'src/reconnect.c' 'tests/reconnect_tests.c' '-o' (Join-Path $buildRoot 'reconnect_tests.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Reconnect test compilation failed' }
+    $play = $common + @('src/playback.c', 'src/wav_source.c', 'src/reconnect.c')
     & $compiler @play 'tests/playback_tests.c' '-o' (Join-Path $buildRoot 'playback_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Playback test compilation failed' }
     & $compiler @play 'tests/wav_source_tests.c' '-o' (Join-Path $buildRoot 'wav_source_tests.exe')
@@ -48,7 +50,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & (Join-Path $buildRoot 'avdtp_session_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'AVDTP session tests failed' }
-    foreach ($name in @('avdtp_reassembly_tests','playback_tests','wav_source_tests','native_io_tests')) {
+    foreach ($name in @('reconnect_tests','avdtp_reassembly_tests','playback_tests','wav_source_tests','native_io_tests')) {
         & (Join-Path $buildRoot ($name+'.exe'))
         if ($LASTEXITCODE -ne 0) { throw "$name failed" }
     }

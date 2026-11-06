@@ -613,12 +613,159 @@ static int close_tests(void) {
     return 0;
 }
 
+
+static int peer_control_tests(void) {
+    wl_avdtp_session s, before;
+    wl_avdtp_peer_reply reply, saved, zero = {0};
+    uint8_t packet[5] = {0xb0, SUSPEND, 28, 0, 0};
+    CHECK(streaming(&s)==0); before=s;
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+    CHECK(reply.size==2 && reply.bytes[0]==0xb2 && reply.bytes[1]==SUSPEND);
+    CHECK(reply.action==WL_AVDTP_PEER_SUSPEND && !memcmp(&s,&before,sizeof(s)));
+    /* If sending fails, omission of commit leaves no acknowledged transition. */
+    saved=reply;
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+    CHECK(!memcmp(&s,&before,sizeof(s)) && !memcmp(&reply,&saved,sizeof(reply)));
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+    CHECK(s.state==WL_AVDTP_SESSION_SUSPENDED && s.serial==before.serial+1);
+    before=s;
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==WL_AVDTP_SESSION_TOKEN_MISMATCH);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    packet[1]=START;packet[2]=31; /* RFA bits ignored, local SEP7, not remote5. */
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+    CHECK(reply.action==WL_AVDTP_PEER_START && reply.bytes[0]==0xb2);
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0 && s.state==WL_AVDTP_SESSION_STREAMING);
+    before=s;
+    CHECK(wl_avdtp_session_peer_commit(&s,&saved)==WL_AVDTP_SESSION_TOKEN_MISMATCH);
+    CHECK(!memcmp(&s,&before,sizeof(s))); /* State ABA still cannot replay. */
+    for(unsigned signal=START;signal<=ABORT;++signal) {
+        packet[1]=(uint8_t)signal;
+        for(unsigned seid=0;seid<64;++seid) {
+            packet[2]=(uint8_t)(seid<<2);before=s;
+            CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+            CHECK(!memcmp(&s,&before,sizeof(s)));
+            if(seid!=7) {
+                CHECK(reply.action==WL_AVDTP_PEER_NONE);
+                if(signal==ABORT)CHECK(reply.size==0 && !memcmp(&reply,&zero,sizeof(reply)));
+                else {
+                    CHECK(reply.bytes[0]==0xb3 && reply.bytes[1]==signal);
+                    if(signal==START || signal==SUSPEND) {
+                        CHECK(reply.size==4 && reply.bytes[2]==(seid<<2) && reply.bytes[3]==0x12);
+                    } else CHECK(reply.size==3 && reply.bytes[2]==0x12);
+                    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+                    CHECK(s.state==before.state && s.configured && s.transport_valid);
+                }
+            } else if(signal==START) {
+                CHECK(reply.action==WL_AVDTP_PEER_NONE && reply.size==4 && reply.bytes[3]==0x31);
+                CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+                CHECK(s.state==WL_AVDTP_SESSION_STREAMING);
+            } else CHECK(reply.size==2 && reply.action!=WL_AVDTP_PEER_NONE);
+        }
+    }
+    packet[1]=SUSPEND;packet[2]=28;
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+    CHECK(reply.action==WL_AVDTP_PEER_NONE && reply.size==4 && reply.bytes[3]==0x31);
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0 && s.state==WL_AVDTP_SESSION_SUSPENDED);
+    for(unsigned mode=0;mode<2;++mode) {
+        CHECK(streaming(&s)==0);
+        packet[1]=mode?ABORT:CLOSE;packet[2]=28;
+        CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+        CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+        if(mode)CHECK(s.state==WL_AVDTP_SESSION_ABORTED && !s.transport_valid && !s.configured);
+        else {
+            CHECK(s.state==WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE && s.transport_valid && s.configured);
+            CHECK(wl_avdtp_session_media_closed(&s,100)==0 && s.state==WL_AVDTP_SESSION_CLOSED);
+        }
+    }
+    CHECK(streaming(&s)==0);
+    for(unsigned signal=0;signal<64;++signal) {
+        if(signal>=START && signal<=ABORT)continue;
+        packet[1]=(uint8_t)(signal|0xc0);before=s;
+        CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,2,&reply)==0);
+        CHECK(reply.bytes[1]==signal && reply.action==WL_AVDTP_PEER_NONE);
+        if(!signal || signal>13)CHECK(reply.size==2 && reply.bytes[0]==0xb1);
+        else if(signal==SET_CONFIG || signal==5)CHECK(reply.size==4 && reply.bytes[0]==0xb3 && reply.bytes[2]==0 && reply.bytes[3]==0x19);
+        else CHECK(reply.size==3 && reply.bytes[0]==0xb3 && reply.bytes[2]==0x19);
+        CHECK(!memcmp(&s,&before,sizeof(s)));
+        CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0 && s.state==before.state);
+    }
+    packet[1]=SUSPEND;packet[2]=28;
+    for(unsigned variant=0;variant<9;++variant) {
+        size_t length=3;uint64_t gen=100;int expected=WL_AVDTP_SESSION_MALFORMED;
+        packet[0]=0xb0;
+        if(variant==0)length=0;
+        if(variant==1)length=1;
+        if(variant==2)length=2;
+        if(variant==3)length=4; /* No partial acceptance of multi-SEP lists. */
+        if(variant==4)length=WL_AVDTP_SESSION_MAX_PACKET+1;
+        if(variant==5){packet[0]=0xb4;expected=WL_AVDTP_SESSION_UNSUPPORTED_FRAGMENT;}
+        if(variant==6){packet[0]=0xb2;expected=WL_AVDTP_SESSION_UNMATCHED_RESPONSE;}
+        if(variant==7){gen=99;expected=WL_AVDTP_SESSION_WRONG_GENERATION;}
+        before=s;memset(&reply,0x5a,sizeof(reply));
+        CHECK(wl_avdtp_session_peer_prepare(&s,gen,variant==8?NULL:packet,length,&reply)==expected);
+        CHECK(!memcmp(&s,&before,sizeof(s)) && !memcmp(&reply,&zero,sizeof(reply)));
+    }
+    packet[0]=0xb0;
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);saved=reply;
+    before=s;reply.generation=99;
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==WL_AVDTP_SESSION_WRONG_GENERATION);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    reply=saved;reply.action=WL_AVDTP_PEER_START;
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==WL_AVDTP_SESSION_INVALID_STATE);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    reply=saved;reply.size=0;
+    CHECK(wl_avdtp_session_peer_commit(&s,&reply)==WL_AVDTP_SESSION_INVALID_ARGUMENT);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    CHECK(wl_avdtp_session_request_suspend(&s)==0);
+    CHECK(wl_avdtp_session_peer_commit(&s,&saved)==WL_AVDTP_SESSION_TOKEN_MISMATCH);
+    before=s;
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==WL_AVDTP_SESSION_INVALID_STATE);
+    CHECK(!memcmp(&s,&before,sizeof(s)) && reply.size==0);
+    {
+        command c;
+        CHECK(emit(&s,&c,SUSPEND,3)==0);before=s;
+        CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==WL_AVDTP_SESSION_BUSY);
+        CHECK(wl_avdtp_session_peer_commit(&s,&saved)==WL_AVDTP_SESSION_TOKEN_MISMATCH);
+        CHECK(!memcmp(&s,&before,sizeof(s)));
+    }
+    CHECK(streaming(&s)==0);
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&saved)==0);
+    /* A failed response send is followed by transport retirement, not commit. */
+    CHECK(wl_avdtp_session_transport_failed(&s,100)==WL_AVDTP_SESSION_TRANSPORT_FAILED);
+    before=s;
+    CHECK(wl_avdtp_session_peer_commit(&s,&saved)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+    CHECK(!memcmp(&s,&before,sizeof(s)) && reply.size==0);
+    CHECK(wl_avdtp_session_init(&s,101,7,48000)==0);before=s;
+    CHECK(wl_avdtp_session_peer_commit(&s,&saved)==WL_AVDTP_SESSION_WRONG_GENERATION);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    for(unsigned mode=0;mode<2;++mode) {
+        CHECK(streaming(&s)==0);packet[1]=SUSPEND;
+        CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+        CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+        packet[1]=mode?ABORT:CLOSE;
+        CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==0);
+        CHECK(reply.action==(mode?WL_AVDTP_PEER_ABORT:WL_AVDTP_PEER_CLOSE));
+        CHECK(wl_avdtp_session_peer_commit(&s,&reply)==0);
+        CHECK(s.state==(mode?WL_AVDTP_SESSION_ABORTED:WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE));
+    }
+    CHECK(streaming(&s)==0);s.serial=UINT64_MAX;before=s;
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,&reply)==WL_AVDTP_SESSION_SEQUENCE_EXHAUSTED);
+    CHECK(!memcmp(&s,&before,sizeof(s)) && reply.size==0);
+    CHECK(wl_avdtp_session_peer_prepare(NULL,100,packet,3,&reply)==WL_AVDTP_SESSION_INVALID_ARGUMENT);
+    CHECK(wl_avdtp_session_peer_prepare(&s,100,packet,3,NULL)==WL_AVDTP_SESSION_INVALID_ARGUMENT);
+    CHECK(wl_avdtp_session_peer_commit(&s,NULL)==WL_AVDTP_SESSION_INVALID_ARGUMENT);
+    return 0;
+}
+
 int main(void) {
     if(lifecycle_tests() || exact_rate_tests() || matching_tests() ||
        unmatched_malformed_priority_tests() ||
        discover_failure_tests() || capability_failure_tests() ||
        reject_and_packet_tests() || fixed_signal_reject_tests() || packet_boundary_tests() ||
-       sequence_exhaustion_tests() || token_and_epoch_tests() || state_and_wrap_tests() || close_tests())return 1;
+       sequence_exhaustion_tests() || token_and_epoch_tests() || state_and_wrap_tests() || close_tests() || peer_control_tests())return 1;
     printf("{\"kind\":\"offline_avdtp_session_tests\",\"checks\":%u,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false}\n",checks);
     return 0;

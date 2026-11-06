@@ -146,8 +146,10 @@ static int peer_failure_tests(void) {
     p.io->handles[WL_MEDIA]=duplicate;p.io->out_mtu[WL_MEDIA]=OL_MAX_PACKET;p.io->in_mtu[WL_MEDIA]=OL_MAX_PACKET;
     CHECK(peer_write(&p,unsolicited,sizeof(unsolicited))==0);
     CHECK(WaitForSingleObject(p.io->monitor.ov.hEvent,1000)==WAIT_OBJECT_0);
-    CHECK(native_send(p.io,WL_MEDIA,media,sizeof(media),1000)!=0);
-    CHECK(wl_win_native_last_error(p.io)==ERROR_CONNECTION_ABORTED);
+    CHECK(native_poll_control(p.io,0)==WL_PLAY_IO_CONTROL);
+    CHECK(native_send(p.io,WL_MEDIA,media,sizeof(media),1000)==0);
+    CHECK(native_poll_control(p.io,0)==WL_PLAY_IO_CONTROL);
+    CHECK(wl_win_native_last_error(p.io)==ERROR_SUCCESS);
     close_pipe(&p);
     CHECK(make_pipe(&p)==0);CHECK(arm_monitor(p.io)==0 && p.io->monitor.active);
     CHECK(QueryPerformanceCounter(&p.io->anchor));
@@ -304,9 +306,151 @@ static int terminal_drain_tests(void) {
           wl_win_native_last_error(p.io)==ERROR_PIPE_NOT_CONNECTED || wl_win_native_last_error(p.io)==ERROR_NO_DATA);
     close_pipe(&p);return 0;
 }
+static int control_readiness_pause_tests(void) {
+    pipe_fixture p;uint8_t packet[OL_MAX_PACKET];size_t bytes=0;HANDLE thread;
+    const uint8_t suspend[]={0x10,9,4};LARGE_INTEGER before_anchor,before_completion;
+    LONGLONG shift;wl_playback_io bound;
+    CHECK(make_pipe(&p)==0);
+    wl_win_native_bind(p.io,&bound);
+    CHECK(bound.poll_control==native_poll_control && bound.pause_clock==native_pause_clock);
+    CHECK(native_poll_control(p.io,0)==0 && p.io->monitor.active);
+    CHECK(native_poll_control(p.io,5)==0 && p.io->monitor.active);
+    CHECK(native_pause_clock(p.io,2)<0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    CHECK(peer_write(&p,suspend,sizeof(suspend))==0);
+    CHECK(native_poll_control(p.io,1000)==WL_PLAY_IO_CONTROL);
+    CHECK(native_wait_samples(p.io,0,48000)==WL_PLAY_IO_CONTROL);
+    CHECK(p.io->wait_pending && p.io->pending_offset==0);
+    CHECK(native_wait_samples(p.io,0,48000)==WL_PLAY_IO_CONTROL);
+    CHECK(native_wait_samples(p.io,128,48000)<0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    CHECK(native_receive(p.io,WL_SIGNALING,packet,sizeof(packet),&bytes,1000)==0);
+    CHECK(bytes==sizeof(suspend) && !memcmp(packet,suspend,bytes));
+    CHECK(native_poll_control(p.io,0)==0 && p.io->monitor.active);
+    /* Seed a long future target: retry validation and stop ownership do not
+     * depend on a VM meeting a short real-time media scheduling deadline. */
+    CHECK(QueryPerformanceCounter(&p.io->anchor));p.io->anchor.QuadPart+=p.io->frequency.QuadPart*60;
+    thread=CreateThread(NULL,0,delayed_stop,p.io->stop,0,NULL);CHECK(thread!=NULL);
+    CHECK(native_wait_samples(p.io,0,48000)<0 && wl_win_native_last_error(p.io)==ERROR_OPERATION_ABORTED);
+    CHECK(WaitForSingleObject(thread,1000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
+    CHECK(ResetEvent(p.io->stop));
+    CHECK(QueryPerformanceCounter(&p.io->anchor));
+    p.io->last_media_completion=p.io->anchor;p.io->media_written=1;
+    before_anchor=p.io->anchor;before_completion=p.io->last_media_completion;
+    CHECK(native_pause_clock(p.io,1)==0 && p.io->clock_paused);
+    CHECK(native_pause_clock(p.io,1)==0); /* idempotent, does not reset pause start */
+    Sleep(60);
+    CHECK(native_wait_samples(p.io,0,48000)<0 && wl_win_native_last_error(p.io)==ERROR_INVALID_STATE);
+    CHECK(native_pause_clock(p.io,0)==0 && !p.io->clock_paused);
+    shift=p.io->anchor.QuadPart-before_anchor.QuadPart;
+    CHECK(shift>=p.io->frequency.QuadPart/20);
+    CHECK(p.io->last_media_completion.QuadPart-before_completion.QuadPart==shift);
+    CHECK(native_pause_clock(p.io,0)==0 && p.io->anchor.QuadPart==before_anchor.QuadPart+shift);
+    CHECK(native_pause_clock(p.io,1)==0);
+    p.io->anchor.QuadPart=LLONG_MAX;
+    Sleep(1);
+    CHECK(native_pause_clock(p.io,0)<0 && wl_win_native_last_error(p.io)==ERROR_ARITHMETIC_OVERFLOW);
+    CHECK(p.io->clock_paused && p.io->anchor.QuadPart==LLONG_MAX);
+    close_pipe(&p);
+
+    CHECK(make_pipe(&p)==0);
+    CHECK(native_poll_control(p.io,0)==0);
+    CHECK(peer_write(&p,suspend,sizeof(suspend))==0);
+    CHECK(WaitForSingleObject(p.io->monitor.ov.hEvent,1000)==WAIT_OBJECT_0);
+    CHECK(SetEvent(p.io->stop));
+    CHECK(native_poll_control(p.io,0)<0 && wl_win_native_last_error(p.io)==ERROR_OPERATION_ABORTED);
+    CHECK(ResetEvent(p.io->stop));
+    CHECK(native_poll_control(p.io,0)==WL_PLAY_IO_CONTROL);
+    CHECK(native_receive(p.io,WL_SIGNALING,packet,sizeof(packet),&bytes,1000)==0);
+    thread=CreateThread(NULL,0,delayed_stop,p.io->stop,0,NULL);CHECK(thread!=NULL);
+    CHECK(native_poll_control(p.io,60000)<0 && wl_win_native_last_error(p.io)==ERROR_OPERATION_ABORTED);
+    CHECK(WaitForSingleObject(thread,1000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
+    CHECK(p.io->monitor.active); /* owner retains monitor until close drains it */
+    close_pipe(&p);
+
+    CHECK(make_pipe(&p)==0);
+    /* Defensive completion seam for zero-byte EOF, distinct from an actual
+     * disconnect (covered above). It must never be reported as control data. */
+    p.io->monitor_armed=1;p.io->monitor.completed=1;p.io->monitor.bytes=0;
+    CHECK(SetEvent(p.io->monitor.ov.hEvent));
+    CHECK(native_poll_control(p.io,0)<0 && wl_win_native_last_error(p.io)==ERROR_CONNECTION_ABORTED);
+    close_pipe(&p);
+    return 0;
+}
+static int interrupted_initial_wait_resume_success_test(void) {
+    pipe_fixture p;uint8_t packet[OL_MAX_PACKET];size_t bytes=0;
+    const uint8_t suspend[]={0x10,9,4};LARGE_INTEGER before_pause,after_wait;LONGLONG target;
+    CHECK(make_pipe(&p)==0);
+    CHECK(native_poll_control(p.io,0)==0);
+    CHECK(peer_write(&p,suspend,sizeof(suspend))==0);
+    CHECK(native_poll_control(p.io,1000)==WL_PLAY_IO_CONTROL);
+    CHECK(native_wait_samples(p.io,0,48000)==WL_PLAY_IO_CONTROL);
+    CHECK(p.io->wait_pending && p.io->pending_offset==0);
+    CHECK(native_receive(p.io,WL_SIGNALING,packet,sizeof(packet),&bytes,1000)==0);
+    CHECK(bytes==sizeof(suspend) && !memcmp(packet,suspend,bytes));
+    /* A fixture-seeded 100ms future anchor avoids making pre-wait assertion
+     * scheduling part of the test. The production wait and unchanged 40ms
+     * lateness guard still execute after a real pause longer than 40ms. */
+    CHECK(QueryPerformanceCounter(&p.io->anchor));
+    p.io->anchor.QuadPart+=p.io->frequency.QuadPart/10;
+    before_pause=p.io->anchor;
+    CHECK(native_pause_clock(p.io,1)==0);
+    Sleep(60);
+    CHECK(native_pause_clock(p.io,0)==0);
+    CHECK(p.io->anchor.QuadPart-before_pause.QuadPart>=p.io->frequency.QuadPart/20);
+    CHECK(clock_target(p.io,0,48000,&target)==0);
+    CHECK(native_wait_samples(p.io,0,48000)==0);
+    CHECK(QueryPerformanceCounter(&after_wait));CHECK(after_wait.QuadPart>=target);
+    CHECK(!p.io->wait_pending && p.io->last_offset==0);
+    CHECK(native_wait_samples(p.io,0,48000)<0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    close_pipe(&p);return 0;
+}
+typedef struct {HANDLE server;DWORD error,read_bytes;LARGE_INTEGER before_read;} control_reader;
+static DWORD WINAPI signal_then_read(void *context) {
+    control_reader *r=(control_reader *)context;OVERLAPPED ov={0};DWORD bytes=0;
+    const uint8_t control[]={0x10,9,4};uint8_t packet[OL_MAX_PACKET];
+    ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);
+    if(!ov.hEvent){r->error=GetLastError();return 1;}
+    Sleep(10);
+    if(!WriteFile(r->server,control,sizeof(control),&bytes,&ov)) {
+        r->error=GetLastError();
+        if(r->error==ERROR_IO_PENDING)r->error=GetOverlappedResult(r->server,&ov,&bytes,TRUE)?0:GetLastError();
+    }
+    if(r->error){CloseHandle(ov.hEvent);return 1;}
+    Sleep(50);
+    QueryPerformanceCounter(&r->before_read);
+    {HANDLE event=ov.hEvent;memset(&ov,0,sizeof(ov));ov.hEvent=event;ResetEvent(event);}
+    if(!ReadFile(r->server,packet,sizeof(packet),&r->read_bytes,&ov)) {
+        r->error=GetLastError();
+        if(r->error==ERROR_IO_PENDING)r->error=GetOverlappedResult(r->server,&ov,&r->read_bytes,TRUE)?0:GetLastError();
+    }
+    CloseHandle(ov.hEvent);return r->error?1:0;
+}
+static int control_during_write_and_finish_tests(void) {
+    pipe_fixture p;uint8_t packet[OL_MAX_PACKET]={0};size_t bytes;control_reader reader={0};HANDLE thread;
+    CHECK(make_pipe(&p)==0);CHECK(attach_media_alias(&p)==0);
+    /* Real pipe quota makes the fifth write pending. A peer control arrives
+     * before a later read releases quota; it must not cancel/retry that write. */
+    for(unsigned i=0;i<4;++i)CHECK(native_send(p.io,WL_MEDIA,packet,sizeof(packet),1000)==0);
+    reader.server=p.server;thread=CreateThread(NULL,0,signal_then_read,&reader,0,NULL);CHECK(thread!=NULL);
+    CHECK(native_send(p.io,WL_MEDIA,packet,sizeof(packet),2000)==0);
+    CHECK(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
+    CHECK(reader.error==0 && reader.read_bytes==sizeof(packet));
+    CHECK(!p.io->operations[WL_MEDIA].active && p.io->operations[WL_MEDIA].bytes==sizeof(packet));
+    CHECK(p.io->last_media_completion.QuadPart>=reader.before_read.QuadPart);
+    CHECK(native_poll_control(p.io,0)==WL_PLAY_IO_CONTROL);
+    CHECK(QueryPerformanceCounter(&p.io->anchor));p.io->anchor.QuadPart-=p.io->frequency.QuadPart;
+    p.io->clock_started=1;p.io->clock_rate=48000;p.io->last_offset=0;
+    CHECK(native_finish_media(p.io,128,128,48000)==WL_PLAY_IO_CONTROL);
+    CHECK(!p.io->media_finished && p.io->monitor_armed);
+    CHECK(native_receive(p.io,WL_SIGNALING,packet,sizeof(packet),&bytes,1000)==0);
+    CHECK(bytes==3 && packet[0]==0x10 && packet[1]==9 && packet[2]==4);
+    CHECK(native_finish_media(p.io,128,128,48000)==0 && p.io->media_finished);
+    close_pipe(&p);return 0;
+}
 int main(void) {
     if(pending_and_short_tests() || cancel_timeout_race_tests() || monitor_handoff_tests() || reported_count_bounds_tests() ||
-       peer_failure_tests() || timer_and_validation_tests() || terminal_drain_tests())return 1;
+       peer_failure_tests() || timer_and_validation_tests() || terminal_drain_tests() ||
+       control_readiness_pause_tests() || interrupted_initial_wait_resume_success_test() ||
+       control_during_write_and_finish_tests())return 1;
     printf("{\"kind\":\"real_windows_owned_pipe_native_io_tests\",\"checks\":%u,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false}\n",checks);
     return 0;

@@ -3,7 +3,8 @@
 #define WL_AVDTP_SESSION_H
 #include "avdtp.h"
 
-/* Bounded, single-packet initiator subset, not complete AVDTP/A2DP compliance.
+/* Bounded initiator and established-stream peer-control subset, not complete
+ * AVDTP/A2DP compliance. Input messages must already be reassembled.
  * No heap, OS, clock, worker or transport I/O. Serialize access on the owner.
  * The caller supplies unprotected PCM at exactly source_rate. This module
  * proposes MediaTransport + stereo LDAC only; it neither negotiates content
@@ -73,6 +74,39 @@ typedef struct {
     uint8_t last_reject_category, last_reject_error;
     wl_avdtp_session_token outstanding;
 } wl_avdtp_session;
+
+typedef enum {
+    WL_AVDTP_PEER_NONE = 0,
+    WL_AVDTP_PEER_SUSPEND,
+    WL_AVDTP_PEER_START,
+    WL_AVDTP_PEER_CLOSE,
+    WL_AVDTP_PEER_ABORT
+} wl_avdtp_peer_action;
+
+typedef struct {
+    uint8_t bytes[4];
+    size_t size;
+    wl_avdtp_peer_action action;
+    uint64_t generation, serial;
+    wl_avdtp_session_state original_state;
+} wl_avdtp_peer_reply;
+
+/* Owner-serialized, single-local-SEP peer controls in STREAMING/SUSPENDED.
+ * prepare never mutates the session and clears reply on error. It accepts a
+ * normalized SINGLE command only. size==0 is an invalid-SEID ABORT to discard
+ * without a response or commit. Other successful preparations are sent first;
+ * call commit only after successful response completion. Never send media or
+ * another response between prepare and commit. Failed sends retire transport.
+ * A commit increments serial, so a prepared response cannot be committed twice
+ * or survive an intervening transaction/state cycle. No packet pointer retained.
+ * Known unsupported commands get NOT_SUPPORTED_COMMAND; invalid signal IDs get
+ * GeneralReject. Setup/collisions and malformed/multi-SEP controls fail closed.
+ * This API does not expose AVRCP buttons, volume, or negotiated delay reporting. */
+int wl_avdtp_session_peer_prepare(const wl_avdtp_session *session, uint64_t generation,
+                                  const uint8_t *packet, size_t size,
+                                  wl_avdtp_peer_reply *reply);
+int wl_avdtp_session_peer_commit(wl_avdtp_session *session,
+                                 const wl_avdtp_peer_reply *reply);
 
 /* First initialize the storage with {0}. A restart requires a strictly larger
  * nonzero generation and the previous transport to be invalid/retired. The

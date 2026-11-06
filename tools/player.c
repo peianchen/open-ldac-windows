@@ -9,13 +9,14 @@
 #include <errno.h>
 #include "wav_source.h"
 #include "win_native_io.h"
+#include "reconnect.h"
 
 /* Explicit foreground/service entry points only. This executable never creates
  * a service, changes its start type, installs a driver, or starts at logon. */
 static const wchar_t service_name[] = L"OpenLdacAudioLab";
 typedef struct {
     const char *play, *inspect, *result;
-    unsigned device, bitrate, duration_ms;
+    unsigned device, bitrate, duration_ms, reconnect_restarts;
     int service, selftest, connect, help;
 } arguments;
 typedef struct {
@@ -25,6 +26,7 @@ typedef struct {
     SERVICE_STATUS status;
     wl_wav_source source;
     wl_playback_report report;
+    wl_reconnect_report reconnect;
     volatile LONG requested, control_rate, accepting_controls;
     volatile LONG stop_controls, shutdown_controls, hq_controls, sq_controls, mq_controls;
     volatile LONG rejected_controls, status_error;
@@ -51,12 +53,15 @@ static void usage(void) {
         "  wldac_player --inspect source.wav\n"
         "  wldac_player --play source.wav --connect [--device-index 0..15] [--bitrate kbps]\n"
         "  wldac_player --service --play source.wav --connect [same options]\n"
+        "  Optional: --reconnect-restart 0..3 (default 0; whole WAV restarts after link loss)\n"
         "  wldac_player --service-selftest --result new.json [--duration-ms 1000..60000]\n"
         "Service modes require SCM name OpenLdacAudioLab; no service is installed automatically.\n"
         "Selftest uses SCM and synthetic 48000-Hz control mapping only; no codec/driver/RF.\n"
         "Stereo RIFF PCM16/24/32 or float32, 44100/48000/88200/96000 Hz; no resampling.\n"
         "Default HQ; exact source-family manual bitrates only; no battery downgrade.\n"
         "SCM controls 128=HQ, 129=SQ, 130=MQ; foreground Ctrl+C stops and drains I/O.\n"
+        "Reconnect uses 1/2/4-second stoppable backoff and the same selected interface.\n"
+        "Reconnect replays from the beginning; it is not gapless and never lowers bitrate.\n"
         "Windows command line and file paths preserve Unicode through UTF-16.\n");
 }
 static int parse(int argc, char **argv, arguments *a) {
@@ -76,6 +81,7 @@ static int parse(int argc, char **argv, arguments *a) {
         else if (!strcmp(arg, "--service-selftest")) flag = 64;
         else if (!strcmp(arg, "--result")) flag = 128;
         else if (!strcmp(arg, "--duration-ms")) flag = 256;
+        else if (!strcmp(arg, "--reconnect-restart")) flag = 512;
         else return -1;
         if (seen & flag) return -1;
         seen |= flag;
@@ -89,6 +95,7 @@ static int parse(int argc, char **argv, arguments *a) {
         case 8: if (number(argv[i], &a->device) || a->device > 15) return -1; break;
         case 16: if (number(argv[i], &a->bitrate)) return -1; break;
         case 128: a->result = argv[i]; break;
+        case 512: if (number(argv[i], &a->reconnect_restarts) || a->reconnect_restarts > 3) return -1; break;
         case 256:
             if (number(argv[i], &a->duration_ms) || a->duration_ms < 1000 || a->duration_ms > 60000)
                 return -1;
@@ -97,7 +104,7 @@ static int parse(int argc, char **argv, arguments *a) {
         }
     }
     if (a->inspect) return seen == 2 ? 0 : -1;
-    if (a->selftest) return a->result && !(seen & (1 | 2 | 4 | 8 | 16 | 32)) ? 0 : -1;
+    if (a->selftest) return a->result && !(seen & (1 | 2 | 4 | 8 | 16 | 32 | 512)) ? 0 : -1;
     if (!a->play || !a->connect || (seen & (128 | 256))) return -1;
     return 0;
 }
@@ -142,6 +149,35 @@ static int preflight(void) {
     InterlockedExchange(&app.requested, (LONG)app.args.bitrate);
     return 0;
 }
+typedef struct { wl_win_native_io *native; } reconnect_context;
+static int restart_source(void *context) {
+    (void)context;
+    if (!wl_wav_rewind(&app.source)) return 0;
+    app.worker_error = ERROR_READ_FAULT; return -1;
+}
+static int retry_wait(void *context, unsigned milliseconds) {
+    DWORD wait;
+    (void)context;
+    wait = WaitForSingleObject(app.stop, milliseconds);
+    if (wait == WAIT_TIMEOUT) return 0;
+    app.worker_error = wait == WAIT_OBJECT_0 ? ERROR_OPERATION_ABORTED :
+        (wait == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE);
+    return -1;
+}
+static int retry_link_loss(void *context, int result, const wl_playback_report *report) {
+    reconnect_context *retry = context;
+    (void)report;
+    if (result != WL_PLAY_TRANSPORT) return 0;
+    switch (wl_win_native_last_error(retry->native)) {
+    case ERROR_CONNECTION_ABORTED:
+    case ERROR_CONNECTION_INVALID:
+    case ERROR_DEVICE_NOT_CONNECTED:
+    case ERROR_BROKEN_PIPE:
+    case ERROR_NO_DATA:
+    case ERROR_PIPE_NOT_CONNECTED: return 1;
+    default: return 0; /* In particular: timeout, cancellation, resource errors. */
+    }
+}
 static DWORD WINAPI worker(void *unused) {
     (void)unused;
     if (app.ready) {
@@ -176,8 +212,12 @@ static DWORD WINAPI worker(void *unused) {
     options.ssrc = (uint32_t)(stamp.LowPart ^ GetCurrentProcessId());
     options.local_seid = 1; options.bitrate_kbps = app.args.bitrate;
     wl_win_native_bind(native, &io);
-    app.worker_result = wl_playback_run(&io, &app.source.pcm, &options, &app.report);
-    app.worker_error = wl_win_native_last_error(native);
+    reconnect_context context = {native};
+    wl_reconnect_policy policy = {&context, app.args.reconnect_restarts,
+        restart_source, retry_wait, retry_link_loss};
+    app.worker_result = wl_playback_reconnect(&io, &app.source.pcm, &options,
+        &policy, &app.report, &app.reconnect);
+    if (!app.worker_error) app.worker_error = wl_win_native_last_error(native);
     wl_win_native_destroy(native);
     return 0;
 }
@@ -287,7 +327,8 @@ stopping:
         if (WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0 && !error) error = GetLastError();
         CloseHandle(thread);
     }
-    if (!error && app.worker_result != WL_PLAY_OK && app.worker_result != WL_PLAY_STOPPED) {
+    if (!error && app.worker_result != WL_PLAY_OK && app.worker_result != WL_PLAY_STOPPED &&
+        app.worker_result != WL_PLAY_PEER_CLOSED) {
         error = app.worker_error;
         if (!error) { error = ERROR_SERVICE_SPECIFIC_ERROR; specific = (DWORD)-app.worker_result; }
     }
@@ -356,16 +397,23 @@ static int run(int argc, char **argv) {
             else {
                 worker(NULL);
                 if (!SetConsoleCtrlHandler(console_handler, FALSE)) app.exit_code = GetLastError();
-                if (app.worker_result != WL_PLAY_OK && app.worker_result != WL_PLAY_STOPPED)
+                if (app.worker_result != WL_PLAY_OK && app.worker_result != WL_PLAY_STOPPED &&
+                    app.worker_result != WL_PLAY_PEER_CLOSED)
                     app.exit_code = app.worker_error ? app.worker_error : ERROR_SERVICE_SPECIFIC_ERROR;
                 printf("{\"kind\":\"native_playback_report\",\"result\":%d,\"win32_error\":%lu,"
                     "\"protocol_error\":%d,\"encoder_error\":%d,\"stage\":%u,"
                     "\"actual_kbps\":%u,\"source_frames\":%llu,\"media_packets\":%llu,"
-                    "\"media_bytes\":%llu,\"bitrate_changes\":%u,\"battery_downgrade\":false}\n",
+                    "\"media_bytes\":%llu,\"bitrate_changes\":%u,\"requested_kbps\":%u,"
+                    "\"attempts\":%u,\"restarts\":%u,\"retry_exhausted\":%s,"
+                    "\"generation_exhausted\":%s,\"reconnect_max_retries\":%u,\"restart_policy\":\"whole_source\","
+                    "\"counters_scope\":\"last_attempt\",\"battery_downgrade\":false}\n",
                     app.worker_result, (unsigned long)app.worker_error, app.report.protocol_error,
                     app.report.encoder_error, app.report.stage, app.report.actual_kbps,
                     (unsigned long long)app.report.source_frames, (unsigned long long)app.report.media_packets,
-                    (unsigned long long)app.report.media_bytes, app.report.bitrate_changes);
+                    (unsigned long long)app.report.media_bytes, app.report.bitrate_changes,
+                    app.report.requested_kbps, app.reconnect.attempts, app.reconnect.restarts,
+                    app.reconnect.exhausted ? "true" : "false",
+                    app.reconnect.generation_exhausted ? "true" : "false", app.args.reconnect_restarts);
             }
             AcquireSRWLockExclusive(&console_lock);
             console_stop = NULL;

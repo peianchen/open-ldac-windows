@@ -122,3 +122,7 @@ uses a separate [bounded reassembler](SIGNALING_REASSEMBLY.md) before calling
 without making the session own buffers, clocks or asynchronous I/O. Unmatched
 complete response tuples are still filtered before semantic parsing. An active
 fragment sequence cannot be interleaved with another message in this subset.
+
+## Peer-control continuation
+
+Established single-SEP peer SUSPEND/START/CLOSE/ABORT now use a separate prepare/commit path after reassembly. Optional bounded reconnect explicitly restarts WAV and preserves manual bitrate. See [design and limitations](PEER_CONTROL_RECONNECT.md). The response-only session API still rejects commands; setup and simultaneous local CLOSE collisions remain fail-closed. AVRCP and physical headset interoperability are unverified.

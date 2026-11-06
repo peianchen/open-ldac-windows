@@ -7,7 +7,9 @@
 enum { WL_SIGNALING = 0, WL_MEDIA = 1 };
 enum { WL_PLAY_OK=0, WL_PLAY_ARGUMENT=-1, WL_PLAY_TRANSPORT=-2,
        WL_PLAY_PROTOCOL=-3, WL_PLAY_SOURCE=-4, WL_PLAY_CODEC=-5,
-       WL_PLAY_STOPPED=-6, WL_PLAY_BITRATE=-7, WL_PLAY_MTU=-8 };
+       WL_PLAY_STOPPED=-6, WL_PLAY_BITRATE=-7, WL_PLAY_MTU=-8, WL_PLAY_PEER_CLOSED=-9, WL_PLAY_PEER_ABORTED=-10 };
+/* Only wait_samples/finish_media may return this positive control handoff. */
+enum { WL_PLAY_IO_CONTROL=1 };
 typedef struct {
     void *context;
     /* 0=success; operations must drain their I/O before returning. Channels
@@ -32,6 +34,14 @@ typedef struct {
     /* Required monotonic milliseconds; one signaling transaction shares one
      * deadline across send, all fragments and unmatched responses. */
     uint64_t (*now_ms)(void *);
+    /* Optional paired callbacks. Event wait: 0=quiet/timeout, 1=complete
+     * signaling SDU ready, negative=transport failure. timeout=0 polls.
+     * Wait/finish may return WL_PLAY_IO_CONTROL without consuming their offset.
+     * send must retire the current write and report its actual completion;
+     * control readiness alone must not cancel/retry an uncertain media write. */
+    int (*poll_control)(void *, unsigned timeout_ms);
+    /* Freeze/rebase media clock; does not consume PCM or change bitrate. */
+    int (*pause_clock)(void *, int paused);
 } wl_playback_io;
 typedef struct {
     void *context;
@@ -52,6 +62,7 @@ typedef struct {
     unsigned stage, negotiated_mtu, requested_kbps, actual_kbps;
     uint64_t source_frames, encoded_frames, media_packets, media_bytes;
     unsigned bitrate_changes;
+    unsigned peer_commands, peer_rejects, peer_suspends, peer_resumes;
 } wl_playback_report;
 /* Blocking owner-thread orchestration; the concrete I/O adapter waits on OS
  * events. No device/service installation, heap queue, timer or RF operation is

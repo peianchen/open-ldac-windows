@@ -139,3 +139,7 @@ only the remaining time; progress never renews the deadline. A response observed
 at or after the deadline is rejected even when complete. Stop takes precedence.
 This bounds protocol waiting, not an uncooperative lower driver's cancellation
 retirement, which still must be drained before storage can be released.
+
+## Peer-control continuation
+
+Established single-SEP peer SUSPEND/START/CLOSE/ABORT now use a separate prepare/commit path after reassembly. Optional bounded reconnect explicitly restarts WAV and preserves manual bitrate. See [design and limitations](PEER_CONTROL_RECONNECT.md). The response-only session API still rejects commands; setup and simultaneous local CLOSE collisions remain fail-closed. AVRCP and physical headset interoperability are unverified.

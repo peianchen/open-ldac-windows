@@ -71,6 +71,17 @@ static int read_pcm(void *context, void *pcm, unsigned capacity, unsigned *frame
     *frames = (unsigned)available;
     return 0;
 }
+int wl_wav_rewind(wl_wav_source *source) {
+    if (!source || !source->file || !source->block_align ||
+        !source->data_bytes || source->data_bytes % source->block_align ||
+        source->remaining_bytes > source->data_bytes ||
+        source->remaining_bytes % source->block_align ||
+        source->data_offset > UINT64_MAX - source->data_bytes) return -1;
+    if (seek_to(source->file, source->data_offset)) return -1;
+    clearerr(source->file);
+    source->remaining_bytes = source->data_bytes;
+    return 0;
+}
 void wl_wav_close(wl_wav_source *source) {
     if (!source) return;
     if (source->file) fclose(source->file);
