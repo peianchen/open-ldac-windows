@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "source_commit": "c5cc021c241119bf52e612a9df0528d7b81d261b",
+  "implementation_commit": "b90af29da9fb8c3411c7eeebd60b91e5600312c8",
+  "preflight": {
+    "usb_monitor": "Running",
+    "host_baseline_equal": true,
+    "after_prior3010": true,
+    "boot_utc": "2026-11-06T14:37:30.5000000Z"
+  },
+  "trial": {
+    "started_utc": "2026-11-06T14:48:51.7383063Z",
+    "attach_attempted": true,
+    "attach_exit": 0,
+    "guest_inspected": true,
+    "detach_exit": 1,
+    "pairing_changed": false,
+    "experimental_driver_installed": false,
+    "host_restored": true,
+    "actual_vm_attached": false,
+    "guest_target_count": 0,
+    "guest_radio_ok": false,
+    "error": "No target USB in guest inventory",
+    "finished_utc": "2026-11-06T14:49:38.9105427Z"
+  },
+  "trace": {
+    "session": "OpenLdacUsb20261106",
+    "started_utc": "2026-11-06T14:48:45.5092890Z",
+    "max_duration_seconds": 180,
+    "max_file_mb": 64,
+    "usb_payload_keywords_enabled": false,
+    "start_exit": 0,
+    "stop_exit": 0,
+    "deadline_reached": false,
+    "finished_utc": "2026-11-06T14:49:39.1345820Z"
+  },
+  "trace_summary": {
+    "duration_seconds": 53,
+    "tracerpt_events": 4867,
+    "get_winevent_records": 4866,
+    "events_lost": 0,
+    "etl_sha256": "331E069A07F22B101DCE4860B9325318C139A44AFF9301EACB0236B515C2CFA9",
+    "etl_bytes": 1507328
+  },
+  "target_correlation": {
+    "method": "Exact USB rundown interface VID/PID -> trace-local device pointer; no pointer or serial published",
+    "physical_port": 3,
+    "matching_usb_records": 181,
+    "matching_error_level_records": 0,
+    "pnp_event_ids": [
+      220,
+      222
+    ],
+    "pnp_records": 12,
+    "error_groups": [
+      {
+        "count": 4,
+        "event_ids": [
+          179
+        ],
+        "later_event61_ports": [],
+        "vendor_ids_decimal": [
+          2821
+        ],
+        "target_device_pointer_match": false,
+        "product_ids_decimal": [
+          6459,
+          6582
+        ]
+      },
+      {
+        "count": 4,
+        "event_ids": [
+          132,
+          165,
+          168
+        ],
+        "later_event61_ports": [
+          5
+        ],
+        "vendor_ids_decimal": [],
+        "target_device_pointer_match": false
+      },
+      {
+        "count": 4,
+        "event_ids": [
+          132,
+          165,
+          168
+        ],
+        "later_event61_ports": [
+          4
+        ],
+        "vendor_ids_decimal": [],
+        "target_device_pointer_match": false
+      }
+    ]
+  },
+  "recovery": {
+    "captured_utc": "2026-11-06T14:55:53.4121364Z",
+    "normal_shutdown_observed": true,
+    "clean_snapshot_restored": true,
+    "vm_poweroff": true,
+    "original_usb_configuration_restored": true,
+    "host_checks": [
+      {
+        "role": "MediaTek Bluetooth Adapter",
+        "status": "OK",
+        "binding_unchanged": true
+      },
+      {
+        "role": "WH-1000XM6",
+        "status": "OK",
+        "binding_unchanged": true
+      },
+      {
+        "role": "USB Composite Device",
+        "status": "OK",
+        "binding_unchanged": true
+      }
+    ],
+    "fresh_guest_runtime_rechecked": false,
+    "source_and_evidence_preserved": true
+  },
+  "root_cause_confirmed": false,
+  "guest_usb_gate_passed": false,
+  "xm6_playback_verified": false,
+  "new_software_regression_run": false,
+  "raw_evidence_published": false
+}

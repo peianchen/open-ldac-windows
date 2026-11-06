@@ -48,3 +48,7 @@ PnPUtil 回傳 **3010**，原始輸出表示要重新開機才可完成裝置重
 ## 最終安全狀態
 
 最後 guest 的 Secure Boot／服務／憑證／BCD／Verifier 清潔檢查通過，正常關機後還原同一 clean snapshot 與原 USB 設定，VM 保持 poweroff。主機 MediaTek、XM6 音訊服務及複合裝置狀態均 OK，原 INF／服務／版本一致；配對未修改。PnPUtil 回報的需重新開機條件仍保留，不把狀態 OK 解讀成該操作已完成。
+
+## 後續紀錄
+
+第二次使用者重啟後的有界追蹤與結果另見 [USB ETW 實驗](USB_ETW_2026-11-06.md)。
