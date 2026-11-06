@@ -97,8 +97,13 @@ NTSTATUS WdfIoTargetFormatRequestForInternalIoctlOthers(WDFIOTARGET t,WDFREQUEST
 }
 void WdfRequestSetCompletionRoutine(WDFREQUEST r,PFN_WDF_REQUEST_COMPLETION_ROUTINE fn,void *ctx) { r->completion=fn;r->completion_context=ctx; }
 static void complete(WDFREQUEST r,NTSTATUS status) {
-    WDF_REQUEST_COMPLETION_PARAMS p={{status}};
+    WDF_REQUEST_COMPLETION_PARAMS p={{0}};
     CHECK(r && r->sent);r->sent=0;r->status=status;
+    /* Real BthPort returned the internal OPEN BRB size through the reused IRP.
+     * This lower-stack byte count is not the public CONNECT IOCTL payload. */
+    if (((BRB_HEADER *)r->memory->buffer)->type==BRB_L2CA_OPEN_CHANNEL)
+        r->information=368;
+    p.IoStatus.Status=status;p.IoStatus.Information=r->information;
     r->completion(r,NULL,&p,r->completion_context);
     WdfObjectDereference(r); /* Target-held reference until completion returned. */
 }
@@ -129,7 +134,8 @@ void WdfRequestCompleteWithInformation(WDFREQUEST r,NTSTATUS s,size_t n) {
     CHECK(!r->completed);r->completed=1;r->status=s;r->information=n;
     WdfObjectDelete(r);
 }
-void WdfRequestComplete(WDFREQUEST r,NTSTATUS s) { WdfRequestCompleteWithInformation(r,s,0); }
+/* Plain Complete supplies status only; it must not silently zero Information. */
+void WdfRequestComplete(WDFREQUEST r,NTSTATUS s) { WdfRequestCompleteWithInformation(r,s,r->information); }
 WDFDEVICE WdfIoQueueGetDevice(WDFQUEUE q) { return q->device; }
 WDFDEVICE WdfFileObjectGetDevice(WDFFILEOBJECT f) { return f->device; }
 WDFFILEOBJECT WdfRequestGetFileObject(WDFREQUEST r) { return r->file; }
@@ -211,6 +217,32 @@ static void removal_regression(void) {
     release_provider();finish(f);
 }
 
+static void connect_information(void) {
+    static const NTSTATUS statuses[]={STATUS_SUCCESS,STATUS_UNSUCCESSFUL,STATUS_CANCELLED};
+    unsigned inlined,result;
+    for(inlined=0;inlined<2;++inlined) for(result=0;result<3;++result) {
+        fixture f=setup();WDFREQUEST r;
+        inline_complete=inlined;inline_status=statuses[result];
+        r=connect(f);
+        if(!inlined)complete(last_open,statuses[result]);
+        CHECK(r->completed && r->status==statuses[result]);
+        CHECK(r->information==0); /* Red with plain Complete: lower value is 368. */
+        inline_complete=0; /* Only OPEN completion timing is varied here. */
+        WdfObjectDereference(r);
+        OlFileDetach(f.file);
+        if(last_close && last_close->sent)complete(last_close,0);
+        release_provider();finish(f);
+    }
+    {
+        fixture f=setup();WDFREQUEST r=request(f);
+        r->information=368;r->canceled=1;
+        OlConnectChannel(f.device,r,f.file);
+        CHECK(r->completed && r->status==STATUS_CANCELLED && !open_sends);
+        CHECK(r->information==0);
+        WdfObjectDereference(r);OlFileDetach(f.file);finish(f);
+    }
+}
+
 static void close_faults(void) {
     unsigned which,result;
     for(which=0;which<4;++which) for(result=0;result<2;++result) {
@@ -246,18 +278,22 @@ static void allocation_faults(void) {
     unsigned at;
     for(at=1;at<=5;++at) {
         fixture f=setup();WDFREQUEST r=request(f);
+        r->information=368;
         fail_alloc=allocations+at;
         OlConnectChannel(f.device,r,f.file);
         CHECK(r->completed && !NT_SUCCESS(r->status));
+        CHECK(r->information==0);
         CHECK(open_sends==0 && provider_callback==NULL);
         WdfObjectDereference(r);
         OlFileDetach(f.file);finish(f);
     }
     for(at=0;at<2;++at) {
         fixture f=setup();WDFREQUEST r=request(f);
+        r->information=368;
         if(at)fail_format=1;else fail_send=1;
         OlConnectChannel(f.device,r,f.file);
         CHECK(r->completed && !NT_SUCCESS(r->status));
+        CHECK(r->information==0);
         CHECK(open_sends==0);WdfObjectDereference(r);
         OlFileDetach(f.file);finish(f);
     }
@@ -275,6 +311,7 @@ static void open_races(void) {
         if(before_release)release_provider();
         complete(last_open,success?0:STATUS_CANCELLED);
         CHECK(r->completed && r->status==STATUS_CANCELLED);
+        CHECK(r->information==0); /* Also when successful OPEN races file cleanup. */
         WdfObjectDereference(r);
         if(last_close)complete(last_close,0);
         if(!before_release)release_provider();
@@ -289,8 +326,10 @@ static void open_races(void) {
     }
     {
         fixture f=setup();WDFREQUEST r=request(f);
+        r->information=368;
         OlEvtSurpriseRemoval(f.device);OlConnectChannel(f.device,r,f.file);
         CHECK(r->completed && r->status==STATUS_DEVICE_NOT_CONNECTED && !open_sends);
+        CHECK(r->information==0);
         WdfObjectDereference(r);OlFileDetach(f.file);finish(f);
     }
 }
@@ -401,6 +440,7 @@ static void transfer_capacity(void) {
     finish(f);
 }
 int main(void) {
+    connect_information();
     removal_regression();close_faults();allocation_faults();open_races();data_races();disconnect_reasons();diagnostics();
     retained_capacity();transfer_capacity();
     printf("PASS: %u actual-adapter host checks; NOT kernel/WDF/Verifier acceptance.\n",checks);

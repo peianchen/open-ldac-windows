@@ -95,7 +95,9 @@ VOID OlOpenComplete(WDFREQUEST Request, WDFIOTARGET Target,
         OlConnectionClose(c);
         status = STATUS_CANCELLED;
     }
-    WdfRequestComplete(Request, status);
+    /* CONNECT has no output. The reused request can retain the lower BRB's
+     * byte count (observed as 368); never expose it as public IOCTL data. */
+    WdfRequestCompleteWithInformation(Request, status, 0);
     OlConnectionLeave(c);
 }
 
@@ -109,18 +111,18 @@ VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request,
     NTSTATUS status;
     int began;
     if (InterlockedCompareExchange(&dev->Removed, 0, 0)) {
-        WdfRequestComplete(Request, STATUS_DEVICE_NOT_CONNECTED); return;
+        WdfRequestCompleteWithInformation(Request, STATUS_DEVICE_NOT_CONNECTED, 0); return;
     }
     if (WdfRequestIsCanceled(Request)) {
-        WdfRequestComplete(Request, STATUS_CANCELLED); return;
+        WdfRequestCompleteWithInformation(Request, STATUS_CANCELLED, 0); return;
     }
     status = BthEchoConnectionObjectCreate(&dev->Header, NULL, &object);
-    if (!NT_SUCCESS(status)) { WdfRequestComplete(Request, status); return; }
+    if (!NT_SUCCESS(status)) { WdfRequestCompleteWithInformation(Request, status, 0); return; }
     c = GetConnectionObjectContext(object);
     status = OlFileAttach(FileObject, c);
     if (!NT_SUCCESS(status)) {
         OlConnectionDropOwner(c);
-        WdfRequestComplete(Request, status); return;
+        WdfRequestCompleteWithInformation(Request, status, 0); return;
     }
     WdfObjectReference(Request);
     WdfSpinLockAcquire(c->ConnectionLock);
@@ -128,7 +130,7 @@ VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request,
     if (began) c->OpenRequest = Request;
     WdfSpinLockRelease(c->ConnectionLock);
     if (!began) {
-        WdfRequestComplete(Request, STATUS_CANCELLED);
+        WdfRequestCompleteWithInformation(Request, STATUS_CANCELLED, 0);
         OlConnectionLeave(c);
         WdfObjectDereference(Request); return;
     }
@@ -175,7 +177,7 @@ VOID OlConnectChannel(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request,
         c->OpenRequest = NULL;
         (void)ol_life_open_end(&c->Life, 0);
         WdfSpinLockRelease(c->ConnectionLock);
-        WdfRequestComplete(Request, status);
+        WdfRequestCompleteWithInformation(Request, status, 0);
     }
     OlConnectionLeave(c); /* Protects inline completion until Send returned. */
     WdfObjectDereference(Request);
