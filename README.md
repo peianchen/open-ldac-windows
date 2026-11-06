@@ -1,6 +1,6 @@
 # Open LDAC Windows
 
-Latest physical result: [CONNECT fix, 990 kbps XM6 streaming and listening record](docs/validation/XM6_CONNECT_FIX_2026-11-07.md). An experimental native transport installed only in an isolated Windows VM sent short stereo test tones through the built-in MediaTek radio; the user confirmed hearing both ears at an appropriate volume. Earlier USB, SDP and CONNECT failures remain recorded. This is not measured fidelity, battery life or long-term reliability.
+Latest physical result: [XM6 manual bitrate, endurance and recovery investigation](docs/validation/XM6_SUSTAINED_2026-11-07.md). Three 60-second streams completed with early manual 990→660, 660→330 and 330→990 changes; the user heard both ears without noticing anomalies. The 600-second 990 kbps trial stopped after about 93.4 seconds of source at the unchanged 40 ms pacing guard. Power-off closed safely, but two explicit reopens failed; a fresh service query followed by a new 90-second 660 kbps stream succeeded. This is not automatic reconnect acceptance, measured fidelity or battery-life validation. No experimental host driver is installed.
 
 [繁體中文](README.zh-TW.md)
 
@@ -18,7 +18,8 @@ An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.
 
 **Development: offline core and an experimental VM-only native transport, with
-short 990 kbps XM6 streaming and user-reported bilateral audibility verified.
+short 990 kbps XM6 streaming, user-reported short-tone bilateral audibility,
+and three 60-second sender-side manual bitrate cases recorded.
 No experimental driver is installed on the daily-use host; the Windows audio
 endpoint and release installer are not implemented. Build results alone remain
 distinct from the recorded hardware and listening evidence.**
@@ -35,6 +36,12 @@ distinct from the recorded hardware and listening evidence.**
 - Experimental real XM6 playback of 2-second stereo test tones at 990 kbps, with
   sender completion, normal channel retirement, and later user-reported hearing
   in both ears. The transport was installed in the isolated VM only.
+- Three real 60-second manual bitrate cases with one applied change each (990→660,
+  660→330, 330→990), tested with early controls. The original later-control
+  cases failed before their controls; those failures are retained.
+- Durable native-playback result reports, per-owner Audio MMCSS, per-adapter
+  high-resolution one-shot timing and bounded timing diagnostics. These changes
+  do not remove the 40 ms protection or establish a battery-life improvement.
 - Explicit quality/power policy and a reproducible offline encoder CPU benchmark.
 - Tests for malformed input, MTU limits, packet rollover, codec configurations,
   file preservation and frame headers. Tests do not prove audio quality or playback.

@@ -35,10 +35,48 @@ struct wl_win_native_io {
     unsigned clock_rate;
     volatile LONG *requested;
     DWORD last_error;
+    wl_win_native_timing timing;
 };
 static const GUID native_interface = OL_NATIVE_INTERFACE_GUID;
 _Static_assert(sizeof(ol_native_status)==64,"native status ABI");
 
+static void timing_increment(uint64_t *counter) {
+    if(*counter!=UINT64_MAX)++*counter;
+}
+static uint64_t timing_microseconds(LONGLONG ticks,LONGLONG frequency) {
+    long double value;
+    if(ticks<=0 || frequency<=0)return 0;
+    value=(long double)ticks*1000000.0L/(long double)frequency;
+    return value>=(long double)UINT64_MAX?UINT64_MAX:(uint64_t)value;
+}
+static DWORD timing_io_completion(wl_win_native_io *io,DWORD error) {
+    if(error==ERROR_TIMEOUT || error==ERROR_SEM_TIMEOUT) {
+        timing_increment(&io->timing.io_completion_timeout_errors);
+        io->timing.last_timeout_source=WL_WIN_TIMEOUT_IO_COMPLETION;
+    }
+    return error;
+}
+typedef HANDLE (WINAPI *native_timer_create_fn)(LPSECURITY_ATTRIBUTES,LPCWSTR,DWORD,DWORD);
+static HANDLE create_media_timer(wl_win_native_timing *timing,native_timer_create_fn create_timer) {
+    HANDLE timer=create_timer(NULL,NULL,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                              SYNCHRONIZE|TIMER_MODIFY_STATE);
+    if(timer){timing->high_resolution_timer=1;return timer;}
+    timing->high_resolution_timer_error=GetLastError();
+    if(timing->high_resolution_timer_error!=ERROR_INVALID_PARAMETER) {
+        SetLastError(timing->high_resolution_timer_error);return NULL;
+    }
+    /* Unsupported flag only: same unnamed auto-reset ordinary timer behavior.
+     * Other allocation/security failures are never hidden by a fallback. */
+    timing->timer_fallback_used=1;
+    return create_timer(NULL,NULL,0,SYNCHRONIZE|TIMER_MODIFY_STATE);
+}
+static void timing_pacing_observation(wl_win_native_timing *timing,uint64_t late_us,int after_timer_wake) {
+    if(late_us>timing->peak_pacing_lateness_us)timing->peak_pacing_lateness_us=late_us;
+    if(after_timer_wake) {
+        timing_increment(&timing->pacing_timer_wake_samples);
+        if(late_us>timing->peak_timer_wake_lateness_us)timing->peak_timer_wake_lateness_us=late_us;
+    } else if(late_us>timing->peak_before_wait_lateness_us)timing->peak_before_wait_lateness_us=late_us;
+}
 static DWORD slot_finish(HANDLE file,native_slot *slot,int wait) {
     if(slot->completed)return slot->error;
     if(!GetOverlappedResult(file,&slot->ov,&slot->bytes,wait?TRUE:FALSE)) {
@@ -94,8 +132,12 @@ static DWORD wait_slot(wl_win_native_io *io,HANDLE file,native_slot *slot,
     else if(peer_event && wait==WAIT_OBJECT_0+1)error=ERROR_CONNECTION_ABORTED;
     else if(wait==WAIT_OBJECT_0+count-1) {
         error=slot_finish(file,slot,0);
-        if(error!=ERROR_IO_INCOMPLETE)return error;
-    } else error=wait==WAIT_TIMEOUT?ERROR_TIMEOUT:wait==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE;
+        if(error!=ERROR_IO_INCOMPLETE)return timing_io_completion(io,error);
+    } else if(wait==WAIT_TIMEOUT) {
+        timing_increment(&io->timing.io_wait_timeouts);
+        io->timing.last_timeout_source=WL_WIN_TIMEOUT_IO_WAIT;
+        error=ERROR_TIMEOUT;
+    } else error=wait==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE;
     slot_cancel_drain(file,slot);return error;
 }
 /* The same implementation is exercised by owned named pipes in the OS tests. */
@@ -108,6 +150,7 @@ static DWORD native_perform(wl_win_native_io *io,HANDLE file,native_slot *slot,
     if(peer_event && WaitForSingleObject(peer_event,0)==WAIT_OBJECT_0)return ERROR_CONNECTION_ABORTED;
     error=slot_begin(file,slot,op,code,input,input_size,output,output_size);
     if(error==ERROR_IO_PENDING)error=wait_slot(io,file,slot,timeout,peer_event);
+    else error=timing_io_completion(io,error);
     *bytes=slot->bytes;
     if(!error)error=stopped_error(io);
     if(!error && peer_event && WaitForSingleObject(peer_event,0)==WAIT_OBJECT_0)error=ERROR_CONNECTION_ABORTED;
@@ -154,7 +197,7 @@ static DWORD arm_monitor(wl_win_native_io *io) {
     error=slot_begin(io->handles[WL_SIGNALING],&io->monitor,NATIVE_READ,0,NULL,0,
                      io->monitor_buffer,io->in_mtu[WL_SIGNALING]);
     io->monitor_armed=1;
-    return error==ERROR_IO_PENDING?ERROR_SUCCESS:error;
+    return error==ERROR_IO_PENDING?ERROR_SUCCESS:timing_io_completion(io,error);
 }
 /* A completed monitor owns one immutable SDU until native_receive retires it.
  * Readiness is not disconnect: only EOF, bad counts or an OS error fail. */
@@ -169,6 +212,7 @@ static int native_poll_control(void *context,unsigned timeout_ms) {
     if(wait==WAIT_FAILED)return result(io,GetLastError());
     error=slot_finish(io->handles[WL_SIGNALING],&io->monitor,0);
     if(error==ERROR_IO_INCOMPLETE)return result(io,ERROR_SUCCESS);
+    error=timing_io_completion(io,error);
     if(!error && !io->monitor.bytes)error=ERROR_CONNECTION_ABORTED;
     if(!error && (io->monitor.bytes>io->in_mtu[WL_SIGNALING] || io->monitor.bytes>OL_MAX_PACKET))
         error=ERROR_INVALID_DATA;
@@ -228,6 +272,7 @@ static int native_open(void *context,unsigned channel,unsigned *out_mtu,unsigned
 }
 static int native_send(void *context,unsigned channel,const uint8_t *packet,size_t length,unsigned timeout) {
     wl_win_native_io *io=(wl_win_native_io *)context;DWORD bytes,error;
+    LARGE_INTEGER started={0},ended={0};int have_start=0,have_end=0;
     if(!io || channel>WL_MEDIA || !packet || !length || length>OL_MAX_PACKET)return io?result(io,ERROR_INVALID_PARAMETER):-1;
     if(io->handles[channel]==INVALID_HANDLE_VALUE)return result(io,ERROR_INVALID_HANDLE);
     if(length>io->out_mtu[channel])return result(io,ERROR_BAD_LENGTH);
@@ -238,12 +283,25 @@ static int native_send(void *context,unsigned channel,const uint8_t *packet,size
          * Cancelling on signaling readiness would make successful delivery
          * ambiguous and a subsequent retry could duplicate audio. */
     }
+    if(channel==WL_MEDIA) {
+        timing_increment(&io->timing.media_write_calls);
+        have_start=QueryPerformanceCounter(&started)!=0;
+    }
     error=native_perform(io,io->handles[channel],&io->operations[channel],NATIVE_WRITE,
           0,packet,(DWORD)length,NULL,0,&bytes,timeout,NULL);
     if(!error)error=exact_write_result(bytes,length);
-    if(!error && channel==WL_MEDIA) {
-        if(!QueryPerformanceCounter(&io->last_media_completion))error=ERROR_GEN_FAILURE;
-        else io->media_written=1;
+    if(channel==WL_MEDIA) {
+        if(!error) {
+            if(!QueryPerformanceCounter(&io->last_media_completion))error=ERROR_GEN_FAILURE;
+            else {io->media_written=1;ended=io->last_media_completion;have_end=1;}
+        } else have_end=QueryPerformanceCounter(&ended)!=0;
+        /* Includes OS wait and any cancellation drain, not just radio service.
+         * The successful completion QPC was already required by sender drain. */
+        if(have_start && have_end && started.QuadPart>=0 && ended.QuadPart>=started.QuadPart) {
+            uint64_t elapsed=timing_microseconds(ended.QuadPart-started.QuadPart,io->frequency.QuadPart);
+            timing_increment(&io->timing.media_write_timing_samples);
+            if(elapsed>io->timing.max_media_write_us)io->timing.max_media_write_us=elapsed;
+        }
     }
     return result(io,error);
 }
@@ -278,7 +336,7 @@ static DWORD clock_target(wl_win_native_io *io,uint64_t offset,unsigned rate,LON
     *target=io->anchor.QuadPart+(LONGLONG)(whole+fraction);return ERROR_SUCCESS;
 }
 static int native_wait_samples(void *context,uint64_t offset,unsigned rate) {
-    wl_win_native_io *io=(wl_win_native_io *)context;LARGE_INTEGER now,due;LONGLONG target;DWORD error,wait;int control;
+    wl_win_native_io *io=(wl_win_native_io *)context;LARGE_INTEGER now,due;LONGLONG target;DWORD error,wait;int control,timer_woke=0;
     HANDLE events[3];
     if(!io || (rate!=44100 && rate!=48000 && rate!=88200 && rate!=96000))return io?result(io,ERROR_INVALID_PARAMETER):-1;
     if((error=stopped_error(io))!=0)return result(io,error);
@@ -297,9 +355,20 @@ static int native_wait_samples(void *context,uint64_t offset,unsigned rate) {
         long double remaining;
         control=native_poll_control(io,0);if(control)return control;
         if(!QueryPerformanceCounter(&now))return result(io,ERROR_GEN_FAILURE);
+        /* Reuse this deadline QPC. A wake observation includes the intervening
+         * stop/control poll and scheduling delay; it is not a kernel timer stamp. */
+        timing_pacing_observation(&io->timing,now.QuadPart>=target?
+            timing_microseconds(now.QuadPart-target,io->frequency.QuadPart):0,timer_woke);
         if(now.QuadPart>=target) {
-            if((long double)(now.QuadPart-target)*1000.0L>(long double)io->frequency.QuadPart*40.0L)
+            if((long double)(now.QuadPart-target)*1000.0L>
+               (long double)io->frequency.QuadPart*WL_WIN_NATIVE_MAX_LATENESS_MS) {
+                timing_increment(&io->timing.pacing_deadline_misses);
+                timing_increment(timer_woke?&io->timing.pacing_misses_after_timer_wake:
+                    &io->timing.pacing_misses_before_timer_wait);
+                io->timing.last_pacing_miss_offset=offset;
+                io->timing.last_timeout_source=WL_WIN_TIMEOUT_PACING;
                 return result(io,ERROR_TIMEOUT);
+            }
             io->last_offset=offset;io->wait_pending=0;return result(io,ERROR_SUCCESS);
         }
         remaining=(long double)(target-now.QuadPart)*10000000.0L/(long double)io->frequency.QuadPart;
@@ -313,6 +382,7 @@ static int native_wait_samples(void *context,uint64_t offset,unsigned rate) {
             return result(io,ERROR_GEN_FAILURE);
         }
         if(wait!=WAIT_OBJECT_0+2)return result(io,wait==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE);
+        timer_woke=1;
         /* Recheck the absolute QPC deadline after every timer wake; rounding
          * never turns into an active spin or changes the source sample clock. */
     }
@@ -422,7 +492,7 @@ wl_win_native_io *wl_win_native_create(unsigned index,const wchar_t *path,HANDLE
     }
     io->monitor.ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);
     if(!io->monitor.ov.hEvent){error=GetLastError();goto failed;}
-    io->timer=CreateWaitableTimerW(NULL,FALSE,NULL);
+    io->timer=create_media_timer(&io->timing,CreateWaitableTimerExW);
     if(!io->timer){error=GetLastError();goto failed;}
     if(!QueryPerformanceFrequency(&io->frequency) || io->frequency.QuadPart<=0){error=ERROR_GEN_FAILURE;goto failed;}
     return io;
@@ -447,6 +517,12 @@ void wl_win_native_destroy(wl_win_native_io *io) {
     free(io->path);free(io);
 }
 DWORD wl_win_native_last_error(const wl_win_native_io *io) {return io?io->last_error:ERROR_INVALID_PARAMETER;}
+int wl_win_native_get_timing(const wl_win_native_io *io,wl_win_native_timing *out) {
+    if(!out)return -1;
+    memset(out,0,sizeof(*out));
+    if(!io)return -1;
+    *out=io->timing;return 0;
+}
 int wl_win_native_retryable_error(DWORD error) {
     switch(error) {
     /* STATUS_CONNECTION_DISCONNECTED maps to ERROR_NETNAME_DELETED on Windows.

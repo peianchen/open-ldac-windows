@@ -48,7 +48,7 @@ if(WIN32)
   target_compile_definitions(wl_native_io PRIVATE _WIN32_WINNT=0x0a00)
   target_link_libraries(wl_native_io PUBLIC wl_playback setupapi)
   add_executable(wldac_player tools/player.c)
-  target_link_libraries(wldac_player PRIVATE wl_native_io advapi32 shell32)
+  target_link_libraries(wldac_player PRIVATE wl_native_io advapi32 shell32 avrt)
   # The test includes the production adapter to reach its internal OS-I/O seam.
   add_executable(native_io_tests tests/windows/native_io_tests.c)
   target_compile_definitions(native_io_tests PRIVATE _WIN32_WINNT=0x0a00)

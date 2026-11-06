@@ -2,6 +2,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>
+#include <avrt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,11 +28,15 @@ typedef struct {
     wl_wav_source source;
     wl_playback_report report;
     wl_reconnect_report reconnect;
+    wl_win_native_timing timing;
+    int timing_available;
+    int mmcss_attempted, mmcss_registered, mmcss_revert_attempted, mmcss_reverted;
+    DWORD mmcss_registration_error, mmcss_revert_error;
     volatile LONG requested, control_rate, accepting_controls;
     volatile LONG stop_controls, shutdown_controls, hq_controls, sq_controls, mq_controls;
     volatile LONG rejected_controls, status_error;
     int service_main_invoked, handler_registered, running_reported, stop_pending_reported;
-    int timed_out, worker_result;
+    int timed_out, worker_result, preflight_passed, worker_started;
     DWORD worker_error, exit_code;
 } application;
 static application app;
@@ -53,6 +58,7 @@ static void usage(void) {
         "  wldac_player --inspect source.wav\n"
         "  wldac_player --play source.wav --connect [--device-index 0..15] [--bitrate kbps]\n"
         "  wldac_player --service --play source.wav --connect [same options]\n"
+        "  Optional: --result new.json (CREATE_NEW final report; existing files are never overwritten)\n"
         "  Optional: --reconnect-restart 0..3 (default 0; whole WAV restarts after link loss)\n"
         "  wldac_player --service-selftest --result new.json [--duration-ms 1000..60000]\n"
         "Service modes require SCM name OpenLdacAudioLab; no service is installed automatically.\n"
@@ -105,7 +111,7 @@ static int parse(int argc, char **argv, arguments *a) {
     }
     if (a->inspect) return seen == 2 ? 0 : -1;
     if (a->selftest) return a->result && !(seen & (1 | 2 | 4 | 8 | 16 | 32 | 512)) ? 0 : -1;
-    if (!a->play || !a->connect || (seen & (128 | 256))) return -1;
+    if (!a->play || !a->connect || (seen & 256)) return -1;
     return 0;
 }
 static wchar_t *wide_path(const char *utf8) {
@@ -137,16 +143,19 @@ static int preflight(void) {
     }
     if (wl_wav_open(&app.source, app.args.play)) {
         fprintf(stderr, "WAV preflight failed; no Bluetooth channel opened.\n");
+        app.worker_result = WL_PLAY_SOURCE;
         app.worker_error = ERROR_BAD_FORMAT;
         return -1;
     }
     if (app.args.bitrate && wl_bitrate_eqmid(app.source.pcm.rate, app.args.bitrate) < 0) {
         fprintf(stderr, "Bitrate is not an exact choice for this source sample-rate family.\n");
+        app.worker_result = WL_PLAY_BITRATE;
         app.worker_error = ERROR_INVALID_PARAMETER;
         return -1;
     }
     InterlockedExchange(&app.control_rate, (LONG)app.source.pcm.rate);
     InterlockedExchange(&app.requested, (LONG)app.args.bitrate);
+    app.preflight_passed = 1;
     return 0;
 }
 typedef struct { wl_win_native_io *native; } reconnect_context;
@@ -170,8 +179,33 @@ static int retry_link_loss(void *context, int result, const wl_playback_report *
     if (result != WL_PLAY_TRANSPORT) return 0;
     return wl_win_native_retryable_error(wl_win_native_last_error(retry->native));
 }
+/* MMCSS association and reversion belong to the playback owner thread.
+ * Audio uses the OS task's existing settings; no explicit priority override,
+ * system timer resolution, registry or power-plan change is made. */
+static HANDLE worker_mmcss_enter(void) {
+    DWORD task_index = 0;
+    HANDLE task;
+    app.mmcss_attempted = 1;
+    task = AvSetMmThreadCharacteristicsW(L"Audio", &task_index);
+    if (task) app.mmcss_registered = 1;
+    else {
+        app.mmcss_registration_error = GetLastError();
+        if (!app.mmcss_registration_error) app.mmcss_registration_error = ERROR_GEN_FAILURE;
+    }
+    return task;
+}
+static void worker_mmcss_leave(HANDLE task) {
+    if (!task) return;
+    app.mmcss_revert_attempted = 1;
+    if (AvRevertMmThreadCharacteristics(task)) app.mmcss_reverted = 1;
+    else {
+        app.mmcss_revert_error = GetLastError();
+        if (!app.mmcss_revert_error) app.mmcss_revert_error = ERROR_GEN_FAILURE;
+    }
+}
 static DWORD WINAPI worker(void *unused) {
     (void)unused;
+    app.worker_started = 1;
     if (app.ready) {
         HANDLE startup[] = {app.stop, app.ready};
         DWORD wait = WaitForMultipleObjects(2, startup, FALSE, INFINITE);
@@ -198,6 +232,9 @@ static DWORD WINAPI worker(void *unused) {
         app.worker_result = WL_PLAY_TRANSPORT;
         return 0;
     }
+    /* Failure is observable but retains the existing scheduling fallback.
+     * Every exit after this point goes through the matching same-thread revert. */
+    HANDLE mmcss_task = worker_mmcss_enter();
     GetSystemTimeAsFileTime(&now);
     stamp.LowPart = now.dwLowDateTime; stamp.HighPart = now.dwHighDateTime;
     options.generation = stamp.QuadPart ? stamp.QuadPart : 1;
@@ -210,7 +247,9 @@ static DWORD WINAPI worker(void *unused) {
     app.worker_result = wl_playback_reconnect(&io, &app.source.pcm, &options,
         &policy, &app.report, &app.reconnect);
     if (!app.worker_error) app.worker_error = wl_win_native_last_error(native);
+    app.timing_available = wl_win_native_get_timing(native, &app.timing) == 0;
     wl_win_native_destroy(native);
+    worker_mmcss_leave(mmcss_task);
     return 0;
 }
 static int report_status(DWORD state, DWORD error, DWORD specific) {
@@ -261,11 +300,90 @@ static DWORD WINAPI control_handler(DWORD control, DWORD type, void *data, void 
     InterlockedIncrement(&app.rejected_controls);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
+/* Called after the worker has joined, or before it starts. SCM acceptance is a request, not
+ * proof of an applied codec change; report counters cover only the last attempt. */
+static const char *timeout_source(unsigned source) {
+    switch (source) {
+    case WL_WIN_TIMEOUT_PACING: return "pacing_lateness";
+    case WL_WIN_TIMEOUT_IO_WAIT: return "io_wait";
+    case WL_WIN_TIMEOUT_IO_COMPLETION: return "io_completion";
+    default: return "none";
+    }
+}
+static int native_report_json(char *json, size_t capacity) {
+    return snprintf(json, capacity,
+        "{\"kind\":\"native_playback_report\",\"result\":%d,\"win32_error\":%lu,"
+        "\"protocol_error\":%d,\"encoder_error\":%d,\"stage\":%u,"
+        "\"actual_kbps\":%u,\"source_frames\":%llu,\"media_packets\":%llu,"
+        "\"media_bytes\":%llu,\"bitrate_changes\":%u,\"requested_kbps\":%u,"
+        "\"attempts\":%u,\"restarts\":%u,\"retry_exhausted\":%s,"
+        "\"generation_exhausted\":%s,\"reconnect_max_retries\":%u,\"restart_policy\":\"whole_source\","
+        "\"counters_scope\":\"last_attempt\",\"battery_downgrade\":false,"
+        "\"preflight_passed\":%s,\"worker_started\":%s,\"service_mode\":%s,"
+        "\"service_main_invoked\":%s,\"handler_registered\":%s,"
+        "\"running_reported\":%s,\"stop_pending_reported\":%s,"
+        "\"pending_control_requested_kbps\":%ld,\"hq_controls\":%ld,"
+        "\"sq_controls\":%ld,\"mq_controls\":%ld,\"rejected_controls\":%ld,"
+        "\"stop_controls\":%ld,\"shutdown_controls\":%ld,\"service_status_error\":%ld,"
+        "\"exit_code_before_report\":%lu,\"peer_commands\":%u,\"peer_rejects\":%u,"
+        "\"peer_suspends\":%u,\"peer_resumes\":%u,"
+        "\"last_attempt_media_write_completed\":%s,"
+        "\"timing\":{\"available\":%s,\"scope\":\"whole_adapter_all_attempts\","
+        "\"pacing_limit_us\":%u,\"peak_pacing_lateness_us\":%llu,"
+        "\"pacing_deadline_misses\":%llu,\"last_pacing_miss_offset\":%llu,"
+        "\"io_wait_timeouts\":%llu,\"io_completion_timeout_errors\":%llu,"
+        "\"media_write_calls\":%llu,\"media_write_timing_samples\":%llu,"
+        "\"max_media_write_us\":%llu,\"last_timeout_source\":\"%s\","
+        "\"high_resolution_timer\":%s,\"timer_fallback_used\":%s,\"high_resolution_timer_error\":%lu,"
+        "\"pacing_timer_wake_samples\":%llu,\"peak_timer_wake_lateness_us\":%llu,"
+        "\"peak_before_wait_lateness_us\":%llu,\"pacing_misses_after_timer_wake\":%llu,"
+        "\"pacing_misses_before_timer_wait\":%llu},"
+        "\"mmcss\":{\"task\":\"Audio\",\"scope\":\"playback_owner_thread\","
+        "\"priority_override\":false,\"registration_attempted\":%s,\"registered\":%s,"
+        "\"registration_error\":%lu,\"revert_attempted\":%s,\"reverted\":%s,"
+        "\"revert_error\":%lu}}\n",
+        app.worker_result, (unsigned long)app.worker_error, app.report.protocol_error,
+        app.report.encoder_error, app.report.stage, app.report.actual_kbps,
+        (unsigned long long)app.report.source_frames, (unsigned long long)app.report.media_packets,
+        (unsigned long long)app.report.media_bytes, app.report.bitrate_changes,
+        app.report.requested_kbps, app.reconnect.attempts, app.reconnect.restarts,
+        app.reconnect.exhausted ? "true" : "false",
+        app.reconnect.generation_exhausted ? "true" : "false", app.args.reconnect_restarts,
+        app.preflight_passed ? "true" : "false", app.worker_started ? "true" : "false",
+        app.args.service ? "true" : "false", app.service_main_invoked ? "true" : "false",
+        app.handler_registered ? "true" : "false", app.running_reported ? "true" : "false",
+        app.stop_pending_reported ? "true" : "false", atomic_read(&app.requested),
+        atomic_read(&app.hq_controls), atomic_read(&app.sq_controls), atomic_read(&app.mq_controls),
+        atomic_read(&app.rejected_controls), atomic_read(&app.stop_controls), atomic_read(&app.shutdown_controls),
+        atomic_read(&app.status_error), (unsigned long)app.exit_code, app.report.peer_commands,
+        app.report.peer_rejects, app.report.peer_suspends, app.report.peer_resumes,
+        app.report.media_packets ? "true" : "false", app.timing_available ? "true" : "false",
+        WL_WIN_NATIVE_MAX_LATENESS_MS * 1000u,
+        (unsigned long long)app.timing.peak_pacing_lateness_us,
+        (unsigned long long)app.timing.pacing_deadline_misses,
+        (unsigned long long)app.timing.last_pacing_miss_offset,
+        (unsigned long long)app.timing.io_wait_timeouts,
+        (unsigned long long)app.timing.io_completion_timeout_errors,
+        (unsigned long long)app.timing.media_write_calls,
+        (unsigned long long)app.timing.media_write_timing_samples,
+        (unsigned long long)app.timing.max_media_write_us, timeout_source(app.timing.last_timeout_source),
+        app.timing.high_resolution_timer ? "true" : "false", app.timing.timer_fallback_used ? "true" : "false",
+        (unsigned long)app.timing.high_resolution_timer_error,
+        (unsigned long long)app.timing.pacing_timer_wake_samples,
+        (unsigned long long)app.timing.peak_timer_wake_lateness_us,
+        (unsigned long long)app.timing.peak_before_wait_lateness_us,
+        (unsigned long long)app.timing.pacing_misses_after_timer_wake,
+        (unsigned long long)app.timing.pacing_misses_before_timer_wait,
+        app.mmcss_attempted ? "true" : "false", app.mmcss_registered ? "true" : "false",
+        (unsigned long)app.mmcss_registration_error, app.mmcss_revert_attempted ? "true" : "false",
+        app.mmcss_reverted ? "true" : "false", (unsigned long)app.mmcss_revert_error);
+}
 static int result_json(void) {
-    char json[2048]; DWORD written;
+    char json[4096]; DWORD written;
     int length;
     if (app.result_file == INVALID_HANDLE_VALUE) return 0;
-    length = snprintf(json, sizeof(json),
+    if (!app.args.selftest) length = native_report_json(json, sizeof(json));
+    else length = snprintf(json, sizeof(json),
         "{\"kind\":\"scm_no_rf_selftest\",\"service_main_invoked\":%s,"
         "\"handler_registered\":%s,\"running_reported\":%s,\"stop_pending_reported\":%s,"
         "\"test_source_rate\":48000,\"synthetic_control_mapping\":true,"
@@ -330,7 +448,8 @@ finish:
     if (app.ready) { CloseHandle(app.ready); app.ready = NULL; }
     if (!error) error = (DWORD)atomic_read(&app.status_error);
     if (!error) error = app.exit_code;
-    if (result_json() && !error) error = ERROR_WRITE_FAULT;
+    app.exit_code = error;
+    if (result_json() && (!error || !app.args.selftest)) error = ERROR_WRITE_FAULT;
     if (app.result_file != INVALID_HANDLE_VALUE) {
         if (!CloseHandle(app.result_file) && !error) error = GetLastError();
         app.result_file = INVALID_HANDLE_VALUE;
@@ -361,11 +480,12 @@ static int inspect(const char *path) {
 static int run(int argc, char **argv) {
     memset(&app, 0, sizeof(app)); app.result_file = INVALID_HANDLE_VALUE;
     if (parse(argc, argv, &app.args)) { usage(); return ERROR_INVALID_PARAMETER; }
+    app.worker_result = app.args.selftest ? WL_PLAY_OK : WL_PLAY_ARGUMENT;
     if (app.args.help) { usage(); return 0; }
     if (app.args.inspect) return inspect(app.args.inspect);
     app.stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!app.stop) return (int)GetLastError();
-    if (app.args.selftest) {
+    if (app.args.result) {
         wchar_t *path = wide_path(app.args.result);
         if (!path) { CloseHandle(app.stop); return ERROR_INVALID_NAME; }
         app.result_file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW,
@@ -379,6 +499,7 @@ static int run(int argc, char **argv) {
         if (!StartServiceCtrlDispatcherW(table)) {
             app.exit_code = GetLastError();
             app.worker_error = app.exit_code;
+            app.worker_result = WL_PLAY_TRANSPORT;
             if (result_json()) app.exit_code = ERROR_WRITE_FAULT;
         }
     } else {
@@ -392,20 +513,10 @@ static int run(int argc, char **argv) {
                 if (app.worker_result != WL_PLAY_OK && app.worker_result != WL_PLAY_STOPPED &&
                     app.worker_result != WL_PLAY_PEER_CLOSED)
                     app.exit_code = app.worker_error ? app.worker_error : ERROR_SERVICE_SPECIFIC_ERROR;
-                printf("{\"kind\":\"native_playback_report\",\"result\":%d,\"win32_error\":%lu,"
-                    "\"protocol_error\":%d,\"encoder_error\":%d,\"stage\":%u,"
-                    "\"actual_kbps\":%u,\"source_frames\":%llu,\"media_packets\":%llu,"
-                    "\"media_bytes\":%llu,\"bitrate_changes\":%u,\"requested_kbps\":%u,"
-                    "\"attempts\":%u,\"restarts\":%u,\"retry_exhausted\":%s,"
-                    "\"generation_exhausted\":%s,\"reconnect_max_retries\":%u,\"restart_policy\":\"whole_source\","
-                    "\"counters_scope\":\"last_attempt\",\"battery_downgrade\":false}\n",
-                    app.worker_result, (unsigned long)app.worker_error, app.report.protocol_error,
-                    app.report.encoder_error, app.report.stage, app.report.actual_kbps,
-                    (unsigned long long)app.report.source_frames, (unsigned long long)app.report.media_packets,
-                    (unsigned long long)app.report.media_bytes, app.report.bitrate_changes,
-                    app.report.requested_kbps, app.reconnect.attempts, app.reconnect.restarts,
-                    app.reconnect.exhausted ? "true" : "false",
-                    app.reconnect.generation_exhausted ? "true" : "false", app.args.reconnect_restarts);
+                char json[4096];
+                int length = native_report_json(json, sizeof(json));
+                if (length < 0 || (size_t)length >= sizeof(json)) app.exit_code = ERROR_WRITE_FAULT;
+                else printf("%s", json);
             }
             AcquireSRWLockExclusive(&console_lock);
             console_stop = NULL;
@@ -413,7 +524,8 @@ static int run(int argc, char **argv) {
         }
     }
     wl_wav_close(&app.source);
-    if (app.result_file != INVALID_HANDLE_VALUE) CloseHandle(app.result_file);
+    if (!app.args.service && result_json()) app.exit_code = ERROR_WRITE_FAULT;
+    if (app.result_file != INVALID_HANDLE_VALUE && !CloseHandle(app.result_file)) app.exit_code = ERROR_WRITE_FAULT;
     CloseHandle(app.stop);
     return (int)app.exit_code;
 }

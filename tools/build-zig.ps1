@@ -34,7 +34,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Playback test compilation failed' }
     & $compiler @play 'tests/wav_source_tests.c' '-o' (Join-Path $buildRoot 'wav_source_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'WAV source test compilation failed' }
-    & $compiler @play '-D_WIN32_WINNT=0x0a00' 'src/win_native_io.c' 'tools/player.c' '-lsetupapi' '-ladvapi32' '-lshell32' '-o' (Join-Path $buildRoot 'wldac_player.exe')
+    & $compiler @play '-D_WIN32_WINNT=0x0a00' 'src/win_native_io.c' 'tools/player.c' '-lsetupapi' '-ladvapi32' '-lshell32' '-lavrt' '-o' (Join-Path $buildRoot 'wldac_player.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows player compilation failed' }
     & $compiler @play '-D_WIN32_WINNT=0x0a00' 'tests/windows/native_io_tests.c' '-lsetupapi' '-o' (Join-Path $buildRoot 'native_io_tests.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows asynchronous I/O test compilation failed' }

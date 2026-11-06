@@ -68,10 +68,14 @@ static int pending_and_short_tests(void) {
     close_pipe(&p);return 0;
 }
 static int cancel_timeout_race_tests(void) {
-    pipe_fixture p;uint8_t data[8];DWORD bytes,error;native_slot *slot;
+    pipe_fixture p;uint8_t data[8];DWORD bytes,error;native_slot *slot;wl_win_native_timing timing;
     CHECK(make_pipe(&p)==0);slot=&p.io->operations[0];
     CHECK(native_perform(p.io,p.io->handles[0],slot,NATIVE_READ,0,NULL,0,data,sizeof(data),&bytes,5,NULL)==ERROR_TIMEOUT);
     CHECK(!slot->active && slot->completed && slot->error==ERROR_OPERATION_ABORTED);
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+    CHECK(timing.io_wait_timeouts==1 && timing.io_completion_timeout_errors==0);
+    CHECK(timing.pacing_deadline_misses==0 && timing.peak_pacing_lateness_us==0);
+    CHECK(timing.last_timeout_source==WL_WIN_TIMEOUT_IO_WAIT);
     CHECK(slot_begin(p.io->handles[0],slot,NATIVE_READ,0,NULL,0,data,sizeof(data))==ERROR_IO_PENDING);
     CHECK(CancelIoEx(p.io->handles[0],&slot->ov));
     CHECK(wait_slot(p.io,p.io->handles[0],slot,1000,NULL)==ERROR_OPERATION_ABORTED);
@@ -94,6 +98,9 @@ static int cancel_timeout_race_tests(void) {
     CHECK(peer_write(&p,"ghi",3)==0);
     CHECK(native_perform(p.io,p.io->handles[0],slot,NATIVE_READ,0,NULL,0,data,sizeof(data),&bytes,1000,NULL)==0);
     CHECK(bytes==3 && !memcmp(data,"ghi",3));
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+    CHECK(timing.io_wait_timeouts==1 && timing.io_completion_timeout_errors==0);
+    CHECK(timing.last_timeout_source==WL_WIN_TIMEOUT_IO_WAIT);
     close_pipe(&p);return 0;
 }
 static int monitor_handoff_tests(void) {
@@ -166,7 +173,7 @@ static DWORD WINAPI delayed_stop(void *context) {
     Sleep(10);SetEvent((HANDLE)context);return 0;
 }
 static int timer_and_validation_tests(void) {
-    pipe_fixture p;HANDLE thread;unsigned out=0,in=0;volatile LONG request=990;
+    pipe_fixture p;HANDLE thread;unsigned out=0,in=0;volatile LONG request=990;wl_win_native_timing timing;
     CHECK(make_pipe(&p)==0);
     CHECK(native_open(p.io,2,&out,&in)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
     CHECK(native_open(p.io,WL_SIGNALING,&out,&in)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_STATE);
@@ -189,10 +196,22 @@ static int timer_and_validation_tests(void) {
     p.io->clock_started=1;p.io->clock_rate=48000;p.io->last_offset=0;
     p.io->anchor.QuadPart-=p.io->frequency.QuadPart/10;
     CHECK(native_wait_samples(p.io,1,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_TIMEOUT);
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+    CHECK(timing.pacing_deadline_misses==1 && timing.last_pacing_miss_offset==1);
+    CHECK(timing.peak_pacing_lateness_us>WL_WIN_NATIVE_MAX_LATENESS_MS*1000u);
+    CHECK(timing.io_wait_timeouts==0 && timing.io_completion_timeout_errors==0);
+    CHECK(timing.last_timeout_source==WL_WIN_TIMEOUT_PACING);
+    CHECK(timing.pacing_misses_before_timer_wait==1 && timing.pacing_misses_after_timer_wake==0);
+    CHECK(timing.pacing_timer_wake_samples==0 && timing.peak_timer_wake_lateness_us==0);
+    CHECK(timing.peak_before_wait_lateness_us==timing.peak_pacing_lateness_us);
     /* Close cancels and drains the still-pending monitor before destroying its
      * event, buffer and context. Repeated channel closes are harmless. */
     native_close(p.io,WL_MEDIA);native_close(p.io,WL_SIGNALING);native_close(p.io,WL_SIGNALING);
     CHECK(!p.io->monitor.active && !p.io->monitor_armed);
+    /* Close/reopen clears the stream clock, never lifetime timing evidence. */
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+    CHECK(timing.pacing_deadline_misses==1 && timing.last_pacing_miss_offset==1);
+    CHECK(timing.io_wait_timeouts==0 && timing.last_timeout_source==WL_WIN_TIMEOUT_PACING);
     close_pipe(&p);
     CHECK(wl_win_native_create(16,L"unused-owned-test-path",NULL,NULL)==NULL);
     CHECK(GetLastError()==ERROR_INVALID_PARAMETER);
@@ -254,6 +273,13 @@ static int terminal_drain_tests(void) {
     CHECK(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
     CHECK(reader.error==0 && reader.bytes==sizeof(packet));
     CHECK(p.io->media_written && p.io->last_media_completion.QuadPart>=reader.before_read.QuadPart);
+    {
+        wl_win_native_timing timing;
+        CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+        CHECK(timing.media_write_calls==5 && timing.media_write_timing_samples==5);
+        CHECK(timing.max_media_write_us>0);
+        CHECK(timing.io_wait_timeouts==0 && timing.pacing_deadline_misses==0);
+    }
     CHECK(terminal_target(p.io->last_media_completion.QuadPart,1920,48000,p.io->frequency.QuadPart,&target)==0);
     CHECK(native_finish_media(p.io,1920,1920,48000)==0);
     CHECK(QueryPerformanceCounter(&ended));CHECK(ended.QuadPart>=target);
@@ -463,12 +489,112 @@ static int retryable_error_tests(void) {
     CHECK(ERROR_OPERATION_ABORTED==995);
     return 0;
 }
+static unsigned timer_factory_calls,timer_factory_contract_errors;
+static DWORD timer_factory_first_error,timer_factory_second_error;
+static int real_timer_high_resolution,real_timer_fallback;
+static DWORD real_timer_high_resolution_error;
+static HANDLE WINAPI timer_factory_seam(LPSECURITY_ATTRIBUTES attributes,LPCWSTR name,DWORD flags,DWORD access) {
+    DWORD failure=timer_factory_calls?timer_factory_second_error:timer_factory_first_error;
+    DWORD expected_flags=timer_factory_calls?0:CREATE_WAITABLE_TIMER_HIGH_RESOLUTION;
+    if(attributes || name || flags!=expected_flags || access!=(SYNCHRONIZE|TIMER_MODIFY_STATE))
+        ++timer_factory_contract_errors;
+    ++timer_factory_calls;
+    if(failure){SetLastError(failure);return NULL;}
+    /* A real ordinary handle avoids fake HANDLE lifetime assumptions. This
+     * seam tests selection/failure policy; actual high-resolution creation is
+     * checked separately with the unmodified API below. */
+    return CreateWaitableTimerExW(NULL,NULL,0,access);
+}
+static void reset_timer_factory(DWORD first,DWORD second) {
+    timer_factory_calls=timer_factory_contract_errors=0;
+    timer_factory_first_error=first;timer_factory_second_error=second;
+}
+static int high_resolution_timer_tests(void) {
+    wl_win_native_timing timing={0};HANDLE timer;LARGE_INTEGER due;DWORD handle_flags;
+    reset_timer_factory(0,0);
+    timer=create_media_timer(&timing,timer_factory_seam);CHECK(timer!=NULL);
+    CHECK(timer_factory_calls==1 && timer_factory_contract_errors==0);
+    CHECK(timing.high_resolution_timer && !timing.timer_fallback_used && !timing.high_resolution_timer_error);
+    CHECK(CloseHandle(timer));
+    memset(&timing,0,sizeof(timing));reset_timer_factory(ERROR_INVALID_PARAMETER,0);
+    timer=create_media_timer(&timing,timer_factory_seam);CHECK(timer!=NULL);
+    CHECK(timer_factory_calls==2 && timer_factory_contract_errors==0);
+    CHECK(!timing.high_resolution_timer && timing.timer_fallback_used);
+    CHECK(timing.high_resolution_timer_error==ERROR_INVALID_PARAMETER);CHECK(CloseHandle(timer));
+    memset(&timing,0,sizeof(timing));reset_timer_factory(ERROR_ACCESS_DENIED,0);
+    CHECK(create_media_timer(&timing,timer_factory_seam)==NULL && GetLastError()==ERROR_ACCESS_DENIED);
+    CHECK(timer_factory_calls==1 && !timer_factory_contract_errors && !timing.timer_fallback_used);
+    CHECK(timing.high_resolution_timer_error==ERROR_ACCESS_DENIED);
+    memset(&timing,0,sizeof(timing));reset_timer_factory(ERROR_NOT_ENOUGH_MEMORY,0);
+    CHECK(create_media_timer(&timing,timer_factory_seam)==NULL && GetLastError()==ERROR_NOT_ENOUGH_MEMORY);
+    CHECK(timer_factory_calls==1 && !timer_factory_contract_errors && !timing.timer_fallback_used);
+    memset(&timing,0,sizeof(timing));reset_timer_factory(ERROR_INVALID_PARAMETER,ERROR_NOT_ENOUGH_MEMORY);
+    CHECK(create_media_timer(&timing,timer_factory_seam)==NULL && GetLastError()==ERROR_NOT_ENOUGH_MEMORY);
+    CHECK(timer_factory_calls==2 && !timer_factory_contract_errors && timing.timer_fallback_used);
+    CHECK(timing.high_resolution_timer_error==ERROR_INVALID_PARAMETER);
+    memset(&timing,0,sizeof(timing));
+    timer=create_media_timer(&timing,CreateWaitableTimerExW);CHECK(timer!=NULL);
+    CHECK(timing.high_resolution_timer ||
+          (timing.timer_fallback_used && timing.high_resolution_timer_error==ERROR_INVALID_PARAMETER));
+    real_timer_high_resolution=timing.high_resolution_timer;real_timer_fallback=timing.timer_fallback_used;
+    real_timer_high_resolution_error=timing.high_resolution_timer_error;
+    CHECK(GetHandleInformation(timer,&handle_flags));CHECK(!(handle_flags&HANDLE_FLAG_INHERIT));
+    due.QuadPart=-10000; /* one millisecond, one shot; no system-wide timer request */
+    CHECK(SetWaitableTimer(timer,&due,0,NULL,NULL,FALSE));
+    CHECK(WaitForSingleObject(timer,1000)==WAIT_OBJECT_0);
+    CHECK(WaitForSingleObject(timer,0)==WAIT_TIMEOUT); /* auto-reset, not manual-reset */
+    CHECK(CancelWaitableTimer(timer));CHECK(CloseHandle(timer));
+    return 0;
+}
+static int timing_diagnostic_tests(void) {
+    pipe_fixture p;wl_win_native_timing timing;uint64_t counter=UINT64_MAX;
+    timing_increment(&counter);CHECK(counter==UINT64_MAX);
+    counter=UINT64_MAX-1;timing_increment(&counter);CHECK(counter==UINT64_MAX);
+    CHECK(timing_microseconds(1,10000000)==0);
+    CHECK(timing_microseconds(10,10000000)==1);
+    CHECK(timing_microseconds(400000,10000000)==40000);
+    CHECK(timing_microseconds(LLONG_MAX,1)==UINT64_MAX);
+    CHECK(timing_microseconds(-1,10000000)==0);
+    CHECK(timing_microseconds(1,0)==0);
+    memset(&timing,0,sizeof(timing));
+    timing_pacing_observation(&timing,500,0);
+    timing_pacing_observation(&timing,250,1);
+    timing_pacing_observation(&timing,750,1);
+    CHECK(timing.peak_pacing_lateness_us==750 && timing.peak_before_wait_lateness_us==500);
+    CHECK(timing.peak_timer_wake_lateness_us==750 && timing.pacing_timer_wake_samples==2);
+    timing.pacing_timer_wake_samples=UINT64_MAX;
+    timing_pacing_observation(&timing,0,1);CHECK(timing.pacing_timer_wake_samples==UINT64_MAX);
+    memset(&timing,0xa5,sizeof(timing));
+    CHECK(wl_win_native_get_timing(NULL,&timing)<0);
+    CHECK(timing.pacing_deadline_misses==0 && timing.io_wait_timeouts==0 && timing.media_write_calls==0);
+    CHECK(wl_win_native_get_timing(NULL,NULL)<0);
+    CHECK(make_pipe(&p)==0);
+    CHECK(wl_win_native_get_timing(p.io,NULL)<0);
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+    CHECK(timing.last_timeout_source==WL_WIN_TIMEOUT_NONE && timing.media_write_timing_samples==0);
+    /* Classification seam: injected returned error codes are not actual OS
+     * completion-timeout evidence. Real wait timeout is exercised above. */
+    CHECK(timing_io_completion(p.io,ERROR_OPERATION_ABORTED)==ERROR_OPERATION_ABORTED);
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0 && timing.io_completion_timeout_errors==0);
+    CHECK(timing_io_completion(p.io,ERROR_TIMEOUT)==ERROR_TIMEOUT);
+    CHECK(timing_io_completion(p.io,ERROR_SEM_TIMEOUT)==ERROR_SEM_TIMEOUT);
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0);
+    CHECK(timing.io_completion_timeout_errors==2 && timing.io_wait_timeouts==0);
+    CHECK(timing.pacing_deadline_misses==0 && timing.last_timeout_source==WL_WIN_TIMEOUT_IO_COMPLETION);
+    native_close(p.io,WL_MEDIA);native_close(p.io,WL_SIGNALING);
+    CHECK(wl_win_native_get_timing(p.io,&timing)==0 && timing.io_completion_timeout_errors==2);
+    close_pipe(&p);return 0;
+}
 int main(void) {
-    if(retryable_error_tests() || pending_and_short_tests() || cancel_timeout_race_tests() || monitor_handoff_tests() || reported_count_bounds_tests() ||
+    if(high_resolution_timer_tests() || timing_diagnostic_tests() || retryable_error_tests() || pending_and_short_tests() || cancel_timeout_race_tests() || monitor_handoff_tests() || reported_count_bounds_tests() ||
        peer_failure_tests() || timer_and_validation_tests() || terminal_drain_tests() ||
        control_readiness_pause_tests() || interrupted_initial_wait_resume_success_test() ||
        control_during_write_and_finish_tests())return 1;
     printf("{\"kind\":\"real_windows_owned_pipe_native_io_tests\",\"checks\":%u,"
-           "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false}\n",checks);
+           "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false,"
+           "\"high_resolution_timer_observed\":%s,\"timer_fallback_observed\":%s,"
+           "\"high_resolution_timer_error\":%lu}\n",checks,
+           real_timer_high_resolution?"true":"false",real_timer_fallback?"true":"false",
+           (unsigned long)real_timer_high_resolution_error);
     return 0;
 }
