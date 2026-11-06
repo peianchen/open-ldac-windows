@@ -446,8 +446,25 @@ static int control_during_write_and_finish_tests(void) {
     CHECK(native_finish_media(p.io,128,128,48000)==0 && p.io->media_finished);
     close_pipe(&p);return 0;
 }
+static int retryable_error_tests(void) {
+    const DWORD positive[]={ERROR_NETNAME_DELETED,ERROR_CONNECTION_ABORTED,
+        ERROR_CONNECTION_INVALID,ERROR_DEVICE_NOT_CONNECTED,ERROR_BROKEN_PIPE,
+        ERROR_NO_DATA,ERROR_PIPE_NOT_CONNECTED};
+    const DWORD negative[]={ERROR_SUCCESS,ERROR_OPERATION_ABORTED,ERROR_TIMEOUT,
+        ERROR_SEM_TIMEOUT,WAIT_TIMEOUT,ERROR_NOT_ENOUGH_MEMORY,ERROR_OUTOFMEMORY,
+        ERROR_NO_SYSTEM_RESOURCES,ERROR_ACCESS_DENIED,ERROR_INVALID_PARAMETER,
+        ERROR_INVALID_DATA,ERROR_INVALID_HANDLE,ERROR_NOT_READY,ERROR_NO_MORE_ITEMS,
+        ERROR_BUSY,ERROR_IO_PENDING,ERROR_IO_INCOMPLETE,ERROR_FILE_NOT_FOUND,0xffffffffu};
+    for(unsigned i=0;i<sizeof(positive)/sizeof(positive[0]);++i)
+        CHECK(wl_win_native_retryable_error(positive[i])==1);
+    for(unsigned i=0;i<sizeof(negative)/sizeof(negative[0]);++i)
+        CHECK(wl_win_native_retryable_error(negative[i])==0);
+    CHECK(ERROR_NETNAME_DELETED==64);
+    CHECK(ERROR_OPERATION_ABORTED==995);
+    return 0;
+}
 int main(void) {
-    if(pending_and_short_tests() || cancel_timeout_race_tests() || monitor_handoff_tests() || reported_count_bounds_tests() ||
+    if(retryable_error_tests() || pending_and_short_tests() || cancel_timeout_race_tests() || monitor_handoff_tests() || reported_count_bounds_tests() ||
        peer_failure_tests() || timer_and_validation_tests() || terminal_drain_tests() ||
        control_readiness_pause_tests() || interrupted_initial_wait_resume_success_test() ||
        control_during_write_and_finish_tests())return 1;

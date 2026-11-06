@@ -168,15 +168,7 @@ static int retry_link_loss(void *context, int result, const wl_playback_report *
     reconnect_context *retry = context;
     (void)report;
     if (result != WL_PLAY_TRANSPORT) return 0;
-    switch (wl_win_native_last_error(retry->native)) {
-    case ERROR_CONNECTION_ABORTED:
-    case ERROR_CONNECTION_INVALID:
-    case ERROR_DEVICE_NOT_CONNECTED:
-    case ERROR_BROKEN_PIPE:
-    case ERROR_NO_DATA:
-    case ERROR_PIPE_NOT_CONNECTED: return 1;
-    default: return 0; /* In particular: timeout, cancellation, resource errors. */
-    }
+    return wl_win_native_retryable_error(wl_win_native_last_error(retry->native));
 }
 static DWORD WINAPI worker(void *unused) {
     (void)unused;

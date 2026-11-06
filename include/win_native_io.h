@@ -16,5 +16,9 @@ wl_win_native_io *wl_win_native_create(unsigned index, const wchar_t *interface_
 void wl_win_native_bind(wl_win_native_io *, wl_playback_io *);
 void wl_win_native_destroy(wl_win_native_io *);
 DWORD wl_win_native_last_error(const wl_win_native_io *);
+/* Pure classification of positively identified link-loss errors only. The
+ * caller must also require WL_PLAY_TRANSPORT and observe its stop event.
+ * ERROR_OPERATION_ABORTED is ambiguous and never sufficient to retry. */
+int wl_win_native_retryable_error(DWORD error);
 #endif
 #endif

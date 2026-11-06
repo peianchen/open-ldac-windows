@@ -1,0 +1,20 @@
+{
+  "physical_trials": 2,
+  "radio_gate": "BLOCKED: host Captured with no actual guest attachment",
+  "oracle_usb_feature_installed": true,
+  "date": "2026-11-06",
+  "host_security_changed": false,
+  "host_rebooted": false,
+  "source_base": "ee9b27d7868efe9c5e6c4e3d709d9c722a649627",
+  "vm_software_regression_passed": true,
+  "known_limitation": "Remote cancellation 995 remains nonretryable without explicit remote-loss evidence",
+  "headset_playback_verified": false,
+  "host_pairing_changed": false,
+  "windows_native_io_checks": 1471,
+  "oracle_other_features_unchanged": true,
+  "oracle_installer_exit": 0,
+  "host_bluetooth_restored": true,
+  "experimental_host_ldac_driver_installed": false,
+  "guest_target_device_count": 0
+}
+

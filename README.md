@@ -125,3 +125,5 @@ When reporting compatibility, distinguish a successful offline build, kernel
 driver build, driver installation, negotiated LDAC streaming, and actual listening.
 Do not include MAC addresses, private recordings, credentials or raw device dumps
 in public issues. Read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+- [Physical transport preparation and disconnect-error validation](docs/validation/PHYSICAL_TRANSPORT_2026-11-06.md)

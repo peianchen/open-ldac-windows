@@ -447,4 +447,18 @@ void wl_win_native_destroy(wl_win_native_io *io) {
     free(io->path);free(io);
 }
 DWORD wl_win_native_last_error(const wl_win_native_io *io) {return io?io->last_error:ERROR_INVALID_PARAMETER;}
+int wl_win_native_retryable_error(DWORD error) {
+    switch(error) {
+    /* STATUS_CONNECTION_DISCONNECTED maps to ERROR_NETNAME_DELETED on Windows.
+     * A cancelled transfer (995) does not identify who caused cancellation. */
+    case ERROR_NETNAME_DELETED:
+    case ERROR_CONNECTION_ABORTED:
+    case ERROR_CONNECTION_INVALID:
+    case ERROR_DEVICE_NOT_CONNECTED:
+    case ERROR_BROKEN_PIPE:
+    case ERROR_NO_DATA:
+    case ERROR_PIPE_NOT_CONNECTED: return 1;
+    default: return 0;
+    }
+}
 #endif
