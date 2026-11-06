@@ -16,11 +16,22 @@ and its remaining hardware/audio/power gates.
 
 [繁體中文](README.zh-TW.md)
 
+Traditional Chinese: [research background](docs/RESEARCH_BACKGROUND.zh-TW.md),
+[development tutorial](docs/DEVELOPMENT_GUIDE.zh-TW.md),
+[development journal](docs/DEVELOPMENT_JOURNAL.zh-TW.md), and
+[executed kernel-lab record](docs/validation/KERNEL_LAB_2026-11-01.md).
+Latest: [bounded signaling reassembly and transaction deadlines](docs/validation/SIGNALING_REASSEMBLY_2026-11-06.md).
+Previous: [completion-aware sender drain and normal CLOSE, 2026-11-06](docs/validation/GRACEFUL_CLOSE_2026-11-06.md).
+Previous: [native channel/audio-worker implementation and executed VM tests, 2026-11-04](docs/validation/PLAYBACK_USERMODE_2026-11-04.md).
+Previous: [observed WDF low-resource failures and recovery](docs/validation/KERNEL_LOW_RESOURCE_2026-11-04.md).
+Previous: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](docs/validation/KERNEL_LAB_2026-11-03.md).
+
 An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.
 
-**Development milestone M0: offline codec/protocol core. This is not an
-installable audio driver and cannot send audio to Bluetooth headphones yet.**
+**Development: M0 offline core plus an M1 native transport under validation.
+There is no installed LDAC audio driver or Windows audio endpoint yet.
+Native transport code/build results are not playback evidence.**
 
 ## What works in this milestone
 
@@ -30,6 +41,7 @@ installable audio driver and cannot send audio to Bluetooth headphones yet.**
   concatenated LDAC transport frames; no resampling, decoding, or Bluetooth output.
 - LDAC capability selection, basic single-packet AVDTP discovery/capability
   parsing and configuration builders, and bounded RTP/LDAC media packet assembly.
+- A bounded single-packet [AVDTP initiator session](docs/AVDTP_SESSION.md): endpoint traversal, exact PCM rate, media-ready gating and terminal error handling; offline tests only.
 - Explicit quality/power policy and a reproducible offline encoder CPU benchmark.
 - Tests for malformed input, MTU limits, packet rollover, codec configurations,
   file preservation and frame headers. Tests do not prove audio quality or playback.
@@ -72,6 +84,8 @@ not bundled in the source repository. Linux CMake executable paths have no
 
 ```powershell
 ./build/wldac_cli.exe encode input.wav new-output.ldac hq
+./build/wldac_cli.exe bitrates 48000
+./build/wldac_cli.exe encode input.wav new-output.ldac --bitrate 990
 ./build/wldac_cli.exe bench 48000 hq 300
 python tools/benchmark.py build/wldac_cli.exe --output build/cpu-report.json
 ```
@@ -81,14 +95,20 @@ compressed WAV are currently rejected. An offline LDAC file is not a playable
 Windows endpoint. Benchmarks measure synthetic encoder CPU cost; **no watts,
 battery hours, RF retransmissions, or listening scores are measured**.
 
+Manual numeric selection supports 990/660/330 kbps for the 48/96 kHz family and
+909/606/303 kbps for 44.1/88.2 kHz. Omitting the encode selector defaults to HQ.
+The user-mode API supports serialized encoder-mode changes, and the experimental
+SCM worker queues manual requests. Real-headset behavior remains unverified.
+See [bitrate control](docs/BITRATE_CONTROL.md).
+
 ## Native Windows driver roadmap
 
 | Milestone | Deliverable | Status |
 | --- | --- | --- |
 | M0 | Offline codec, protocol primitives, quality/power policy and tests | Implemented; see verification report |
-| M1 | KMDF profile driver with cancelable L2CAP signaling/media channels | Not implemented |
-| M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Not implemented |
-| M3 | Windows audio endpoint and event-driven user-mode encoding service | Not implemented |
+| M1 | KMDF L2CAP transport, XM6-specific INF and discovery probe | Source implemented; build/runtime validation tracked separately |
+| M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Bounded initiator/native-worker prototype; real headset not verified |
+| M3 | Windows audio endpoint and event-driven user-mode encoding service | WAV/SCM worker prototype exists; Windows PCM endpoint not implemented |
 | M4 | Power/latency/glitch measurements, suspend/resume and coexistence | Not measured |
 | M5 | Signed, reviewed installer and recovery path | Not implemented |
 
@@ -96,10 +116,16 @@ The design keeps the existing Windows Bluetooth radio/transport drivers and
 uses public Bluetooth profile DDIs. It does not claim that a registry key adds a
 codec to Microsoft's A2DP driver. See [native architecture](docs/NATIVE_ARCHITECTURE.md)
 and [driver build prerequisites](driver/README.md).
+An isolated real-WDF lab with a synthetic provider passed its baseline and targeted
+standard Verifier cases on `36bc35f`; see the [executed record](docs/validation/KERNEL_LAB_2026-11-01.md).
+Real BthPort/PnP, additional fault profiles and hardware acceptance remain pending;
+see the [kernel test matrix](docs/KERNEL_TEST_MATRIX.md). Host adapter tests and
+the synthetic provider do not establish real Bluetooth or headset compatibility.
 
 ## License and provenance
 
-- Project source: [Apache License 2.0](LICENSE).
+- Original codec/glue/probe source: [Apache License 2.0](LICENSE).
+- Microsoft-derived transport: [MS-PL](driver/LICENSE-MS-PL), with [provenance](driver/UPSTREAM.md).
 - Encoder: AOSP/Sony, pinned commit recorded in [UPSTREAM.md](vendor/libldac/UPSTREAM.md).
 - Keep [NOTICE](NOTICE) and [Sony's upstream NOTICE](vendor/libldac/NOTICE).
   The upstream notice mentions certification for use in products; this repository

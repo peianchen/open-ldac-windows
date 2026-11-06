@@ -6,6 +6,7 @@
 #include <math.h>
 #include <limits.h>
 #include <time.h>
+#include <errno.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -39,16 +40,27 @@ static int number(const char *text, unsigned *value) {
     char *end;
     unsigned long n;
     if (!text || !*text || *text == '-') return -1;
+    for (const char *p = text; *p; ++p) if (*p < '0' || *p > '9') return -1;
+    errno = 0;
     n = strtoul(text, &end, 10);
-    if (*end || n > UINT_MAX) return -1;
+    if (*end || errno == ERANGE || n > UINT_MAX) return -1;
     *value = (unsigned)n;
     return 0;
 }
-static int quality(const char *text) {
+static int quality(const char *text, unsigned rate) {
+    unsigned kbps;
     if (!strcmp(text, "hq")) return LDACBT_EQMID_HQ;
     if (!strcmp(text, "sq")) return LDACBT_EQMID_SQ;
     if (!strcmp(text, "mq")) return LDACBT_EQMID_MQ;
-    return -1;
+    return number(text, &kbps) ? -1 : wl_bitrate_eqmid(rate, kbps);
+}
+static int bitrates(unsigned rate) {
+    unsigned hq = wl_bitrate_kbps(rate, LDACBT_EQMID_HQ);
+    if (!hq) return 2;
+    printf("{\"sample_rate\":%u,\"supported_kbps\":[%u,%u,%u],\"default_kbps\":%u,"
+           "\"selection\":\"manual\",\"battery_downgrade\":false,\"bluetooth_transmitted\":false}\n",
+           rate, hq, wl_bitrate_kbps(rate, LDACBT_EQMID_SQ), wl_bitrate_kbps(rate, LDACBT_EQMID_MQ), hq);
+    return 0;
 }
 static int bench(unsigned rate, int eqmid, unsigned seconds) {
     wl_encoder enc;
@@ -132,7 +144,7 @@ static int read_wave(FILE *file, wave *w) {
     }
     return -1;
 }
-static int encode(const char *input, const char *output, int eqmid) {
+static int encode(const char *input, const char *output, const char *choice) {
     wave w = {0};
     wl_encoder enc = {0};
     wl_encoded packet;
@@ -140,11 +152,17 @@ static int encode(const char *input, const char *output, int eqmid) {
     int result = 1;
     int output_created = 0;
     uint64_t total = 0;
+    int eqmid;
     unsigned char pcm[128 * 2 * 4];
     if (!strcmp(input, output)) { fprintf(stderr, "Input and output must differ.\n"); return 1; }
     in = fopen(input, "rb");
     if (!in || read_wave(in, &w)) {
         fprintf(stderr, "Unsupported/malformed WAV. Require stereo PCM16/24/32 or float32 RIFF WAV.\n");
+        goto done;
+    }
+    eqmid = quality(choice, w.rate);
+    if (eqmid < 0) {
+        fprintf(stderr, "Unsupported bitrate/quality for %u Hz. Use 'bitrates %u' for exact choices.\n", w.rate, w.rate);
         goto done;
     }
     if (wl_encoder_open(&enc, w.rate, w.format, eqmid, 679)) {
@@ -174,7 +192,8 @@ static int encode(const char *input, const char *output, int eqmid) {
     }
     if (fflush(out)) goto done;
     printf("{\"kind\":\"offline_ldac_stream\",\"sample_rate\":%u,\"encoded_bytes\":%llu,"
-           "\"bluetooth_transmitted\":false}\n", w.rate, (unsigned long long)total);
+           "\"requested_kbps\":%u,\"encoder_kbps\":%d,\"eqmid\":%d,\"bluetooth_transmitted\":false}\n",
+           w.rate, (unsigned long long)total, wl_bitrate_kbps(w.rate, eqmid), wl_encoder_bitrate(&enc), eqmid);
     result = 0;
 done:
     if (in) fclose(in);
@@ -184,15 +203,29 @@ done:
     return result;
 }
 int main(int argc, char **argv) {
-    unsigned rate, seconds;
+    unsigned rate, seconds, kbps;
     int eqmid;
     if (argc == 5 && !strcmp(argv[1], "bench") && !number(argv[2], &rate) &&
-        (eqmid = quality(argv[3])) >= 0 && !number(argv[4], &seconds))
+        (eqmid = quality(argv[3], rate)) >= 0 && !number(argv[4], &seconds))
         return bench(rate, eqmid, seconds);
-    if (argc == 5 && !strcmp(argv[1], "encode") && (eqmid = quality(argv[4])) >= 0)
-        return encode(argv[2], argv[3], eqmid);
+    if (argc == 6 && !strcmp(argv[1], "bench") && !number(argv[2], &rate) &&
+        !strcmp(argv[3], "--bitrate") && !number(argv[4], &kbps) &&
+        (eqmid = wl_bitrate_eqmid(rate, kbps)) >= 0 && !number(argv[5], &seconds))
+        return bench(rate, eqmid, seconds);
+    if (argc == 3 && !strcmp(argv[1], "bitrates") && !number(argv[2], &rate))
+        return bitrates(rate);
+    if (argc == 4 && !strcmp(argv[1], "encode"))
+        return encode(argv[2], argv[3], "hq");
+    if (argc == 5 && !strcmp(argv[1], "encode"))
+        return encode(argv[2], argv[3], argv[4]);
+    if (argc == 6 && !strcmp(argv[1], "encode") && !strcmp(argv[4], "--bitrate") &&
+        !number(argv[5], &kbps))
+        return encode(argv[2], argv[3], argv[5]);
     fprintf(stderr, "Offline development tool; no Bluetooth transmission.\n"
         "Usage: wldac_cli bench <44100|48000|88200|96000> <hq|sq|mq> <seconds 1..3600>\n"
-        "       wldac_cli encode input.wav new-output.ldac <hq|sq|mq>\n");
+        "       wldac_cli bench <rate> --bitrate <kbps> <seconds>\n"
+        "       wldac_cli encode input.wav new-output.ldac [hq|sq|mq|kbps] (default HQ)\n"
+        "       wldac_cli encode input.wav new-output.ldac --bitrate <kbps>\n"
+        "       wldac_cli bitrates <rate>\n");
     return 2;
 }

@@ -1,8 +1,12 @@
 # Native Windows architecture decision
 
-Status: proposed architecture. M0 implements only the portable boxes described
-below. Native transport feasibility, hardware compatibility and power behavior
-still require development and measurement.
+Status, 2026-11-04: M0 portable core plus M1 native transport, an integrated
+user-mode WAV playback pipeline, Windows I/O adapter and SCM audio worker.
+See [the playback implementation and limits](PLAYBACK_SERVICE.md).
+The WDK build/INF check has passed. A separate real-WDF synthetic-provider lab
+passed baseline/standard Verifier cases; the production Bluetooth transport's
+actual BthPort load, hardware compatibility, playback and power remain unverified.
+The Windows PCM endpoint and physical-headset acceptance below remain proposed. See the [executed lab record](validation/KERNEL_LAB_2026-11-01.md).
 
 ## Target path
 
@@ -11,16 +15,14 @@ Windows application / audio engine
   -> project PCM audio endpoint (future WaveRT/PortCls or supported ACX design)
   -> event-driven user-mode encoder service
   -> LDAC frames + RTP/LDAC media packets [portable core exists]
-  -> project Bluetooth profile driver [future KMDF, cancelable bounded queues]
+  -> project Bluetooth profile driver [M1 diagnostic implementation; runtime unverified]
   -> Microsoft BthPort/BthUsb + current vendor radio driver
   -> existing Bluetooth adapter -> LDAC-capable headset
 ```
 
 A separate control path handles SDP, AVDTP transactions, endpoint discovery,
 capability negotiation, configure/open/start/suspend/close/abort and remote events.
-The portable AVDTP helpers implement only basic single-packet parsing and two
-command builders; there is no live signaling state machine or fragmented-packet
-reassembly in M0. A complete implementation must negotiate mandatory baseline
+The M1 initiator now drives endpoint selection, configure/OPEN, media readiness, START and normal CLOSE through the native I/O adapter. Incoming transaction responses use bounded signaling reassembly before the complete-message session parser. Full peer command handling, on-wire closure completion and interoperability remain open. A complete implementation must negotiate mandatory baseline
 capabilities, validate peer commands and recover from rejected configurations.
 
 ## Why user-mode encoding with a native transport driver
@@ -43,8 +45,10 @@ system service, autorun entry or permanent background polling is supplied by M0.
    service or advertise an untested all-device hardware match.
 2. Query `GUID_BTHDDI_PROFILE_DRIVER_INTERFACE` and retrieve the remote service
    address through the documented BthEnum interface. Do not hardcode a MAC.
-3. Resolve/validate SDP protocol descriptors, then open the AVDTP signaling
-   channel (PSM 0x0019) using `BRB_L2CA_OPEN_CHANNEL`. Add a media channel only in
+3. M1 binds only the observed XM6 Audio Sink service and uses the fixed AVDTP
+   signaling PSM 0x0019 without synchronous per-open SDP. A future general-device
+   implementation must resolve/validate SDP protocol descriptors asynchronously.
+   Open the signaling channel using `BRB_L2CA_OPEN_CHANNEL`. Add a media channel only in
    the proper negotiated OPEN state. PSM availability alone does not mean A2DP
    configuration succeeded.
 4. Exchange packets through `BRB_L2CA_ACL_TRANSFER`; respect negotiated outbound
@@ -66,7 +70,7 @@ system service, autorun entry or permanent background polling is supplied by M0.
 ## Audio endpoint decision still open
 
 A transport driver alone does not create an ordinary Windows sound output.
-Prototype file-to-headset streaming first, then add an audio endpoint and service.
+The file-to-native-channel prototype and explicit SCM worker are implemented; actual file-to-headset playback is not yet verified. Add the production PCM endpoint after that transport/playback gate.
 Evaluate Microsoft's SysVAD/WaveRT reference versus the supported ACX model for
 the selected minimum Windows version. WASAPI loopback of another output may be
 a diagnostic aid but is not a substitute for the project's production endpoint.
@@ -76,7 +80,9 @@ a diagnostic aid but is not a substitute for the project's production endpoint.
 - Build gate: WDK compiler, static analysis and INF validation pass. This does
   not prove the driver loads or connects.
 - Load gate: explicit test machine/device, recovery procedure and valid signing
-  strategy. No driver is installed by this repository today.
+  strategy. Only the separate synthetic lab has been guest-test-signed and loaded;
+  the production driver has not been installed on the daily-use host. Real provider
+  retirement, additional kernel faults and actual PnP/power behavior remain gates.
 - Transport gate: actual protocol trace shows LDAC configuration accepted and
   media sent to the intended sink. A UI showing "LDAC" is insufficient.
 - Playback gate: real headset audio, pause/resume and reconnect work.

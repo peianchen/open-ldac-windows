@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "wldac.h"
 #include "avdtp.h"
+#include "native_transport.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -137,8 +138,63 @@ static int codec_tests(void) {
     CHECK(wl_encoder_open(&encoder, 48000, LDACBT_SMPL_FMT_F32, 3, 679) < 0);
     return 0;
 }
+static int bitrate_tests(void) {
+    const unsigned rates[] = {44100, 48000, 88200, 96000};
+    const int switches[] = {LDACBT_EQMID_MQ, LDACBT_EQMID_HQ, LDACBT_EQMID_SQ,
+                            LDACBT_EQMID_HQ, LDACBT_EQMID_MQ};
+    float pcm[256] = {0};
+    wl_encoder encoder = {0};
+    wl_encoded packet;
+    CHECK(wl_encoder_set_bitrate(NULL, 990) < 0);
+    CHECK(wl_encoder_set_bitrate(&encoder, 990) < 0);
+    CHECK(wl_encoder_bitrate(&encoder) < 0);
+    CHECK(wl_bitrate_kbps(192000, 0) == 0 && wl_bitrate_kbps(48000, 3) == 0);
+    CHECK(wl_bitrate_eqmid(48000, 0) < 0 && wl_bitrate_eqmid(0, 990) < 0);
+    for (unsigned r = 0; r < 4; ++r) {
+        unsigned highest = (rates[r] == 44100 || rates[r] == 88200) ? 909 : 990;
+        CHECK(!wl_encoder_open(&encoder, rates[r], LDACBT_SMPL_FMT_F32, LDACBT_EQMID_HQ, 679));
+        CHECK(wl_encoder_bitrate(&encoder) == (int)highest);
+        CHECK(wl_bitrate_eqmid(rates[r], highest == 990 ? 909 : 990) < 0);
+        for (unsigned s = 0; s < sizeof(switches) / sizeof(*switches); ++s) {
+            int mode = switches[s];
+            unsigned requested = highest * (unsigned)(3 - mode) / 3;
+            unsigned last_frame_size = 0;
+            CHECK(wl_bitrate_kbps(rates[r], mode) == requested);
+            CHECK(wl_bitrate_eqmid(rates[r], requested) == mode);
+            CHECK(!wl_encoder_set_bitrate(&encoder, requested));
+            CHECK(encoder.requested_eqmid == mode);
+            for (unsigned block = 0; block < 40; ++block) {
+                unsigned pos = 0, count = 0;
+                CHECK(!wl_encoder_push(&encoder, pcm, &packet));
+                while (pos < (unsigned)packet.size) {
+                    unsigned header, length;
+                    CHECK((unsigned)packet.size - pos >= 3 && packet.bytes[pos] == 0xaa);
+                    header = (unsigned)packet.bytes[pos + 1] << 8 | packet.bytes[pos + 2];
+                    length = ((header >> 2) & 0x1ff) + 4;
+                    CHECK(length <= (unsigned)packet.size - pos);
+                    pos += length; last_frame_size = length; ++count;
+                }
+                CHECK(count == (unsigned)packet.frames);
+            }
+            CHECK(last_frame_size == (mode == 0 ? 330u : mode == 1 ? 220u : 110u));
+            CHECK(wl_encoder_bitrate(&encoder) == (int)requested);
+            CHECK(wl_encoder_set_bitrate(&encoder, 777) < 0);
+            CHECK(encoder.requested_eqmid == mode && wl_encoder_bitrate(&encoder) == (int)requested);
+        }
+        wl_encoder_close(&encoder);
+        CHECK(wl_encoder_bitrate(&encoder) < 0 && wl_encoder_set_bitrate(&encoder, highest) < 0);
+    }
+    return 0;
+}
 int main(void) {
-    if (policy_tests() || negotiation_tests() || rtp_tests() || avdtp_tests() || codec_tests()) return 1;
+    CHECK(sizeof(ol_native_request) == 8);
+    CHECK(sizeof(ol_native_status) == 64);
+    CHECK(sizeof(ol_native_diagnostics) == 128);
+    CHECK(offsetof(ol_native_diagnostics, events) == 16 && OL_EVENT_COUNT == 14);
+    CHECK(offsetof(ol_native_status, bytes_sent) == 48);
+    CHECK((OL_IOCTL_QUERY & 3) == 0 && (OL_IOCTL_CONNECT & 3) == 0);
+    CHECK(OL_MAX_INFLIGHT == 8 && OL_MAX_CHANNELS == 2 && OL_MAX_PACKET == 1008);
+    if (policy_tests() || negotiation_tests() || rtp_tests() || avdtp_tests() || codec_tests() || bitrate_tests()) return 1;
     printf("PASS: %u checks; offline codec/protocol/policy only; no Bluetooth playback.\n", checks);
     return 0;
 }

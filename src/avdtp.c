@@ -55,6 +55,32 @@ size_t wl_avdtp_get_caps(uint8_t transaction, uint8_t remote, uint8_t *out, size
     out[2] = remote << 2;
     return 3;
 }
+size_t wl_avdtp_discover(uint8_t transaction, uint8_t *out, size_t capacity) {
+    if (transaction > 15 || !out || capacity < 2) return 0;
+    out[0] = transaction << 4; out[1] = WL_AVDTP_DISCOVER;
+    return 2;
+}
+static size_t endpoint_command(uint8_t transaction, uint8_t remote, uint8_t signal,
+                               uint8_t *out, size_t capacity) {
+    if (transaction > 15 || !valid_seid(remote) || !out || capacity < 3) return 0;
+    out[0] = transaction << 4; out[1] = signal; out[2] = remote << 2;
+    return 3;
+}
+size_t wl_avdtp_open(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
+    return endpoint_command(transaction, remote, WL_AVDTP_OPEN, out, capacity);
+}
+size_t wl_avdtp_start(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
+    return endpoint_command(transaction, remote, WL_AVDTP_START, out, capacity);
+}
+size_t wl_avdtp_suspend(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
+    return endpoint_command(transaction, remote, WL_AVDTP_SUSPEND, out, capacity);
+}
+size_t wl_avdtp_abort(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
+    return endpoint_command(transaction, remote, WL_AVDTP_ABORT, out, capacity);
+}
+size_t wl_avdtp_close(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
+    return endpoint_command(transaction, remote, WL_AVDTP_CLOSE, out, capacity);
+}
 size_t wl_avdtp_set_config(uint8_t transaction, uint8_t remote, uint8_t local,
                           const uint8_t codec[8], uint8_t *out, size_t capacity) {
     uint8_t selected[8];

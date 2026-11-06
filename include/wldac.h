@@ -16,6 +16,10 @@ typedef struct {
 } wl_policy;
 int wl_select_policy(wl_profile profile, unsigned source_rate, int allow_hires,
                      int on_battery, wl_policy *out);
+/* Exact supported nominal kbps for the source-rate family. No resampling or
+ * silent conversion of an invalid rate-family request. Zero/-1 on failure. */
+unsigned wl_bitrate_kbps(unsigned rate, int eqmid);
+int wl_bitrate_eqmid(unsigned rate, unsigned kbps);
 
 /* Codec-specific portion ONLY: excludes AVDTP media type/codec type fields. */
 int wl_ldac_select(const uint8_t *capabilities, size_t size, unsigned preferred_rate,
@@ -38,6 +42,7 @@ typedef struct {
     unsigned channels;
     unsigned sample_bytes;
     int library_error;
+    int requested_eqmid;
 } wl_encoder;
 typedef struct {
     uint8_t bytes[LDACBT_MAX_NBYTES];
@@ -48,5 +53,9 @@ int wl_encoder_open(wl_encoder *enc, unsigned rate, LDACBT_SMPL_FMT_T format,
                      int eqmid, unsigned l2cap_mtu);
 /* Each non-NULL call supplies exactly 128 interleaved samples/channel. */
 int wl_encoder_push(wl_encoder *enc, const void *pcm, wl_encoded *out);
+/* Serialize with push/close on the encoder's owning thread. Buffered old frames
+ * may still be emitted during a switch; this does not reconfigure a headset. */
+int wl_encoder_set_bitrate(wl_encoder *enc, unsigned kbps);
+int wl_encoder_bitrate(const wl_encoder *enc);
 void wl_encoder_close(wl_encoder *enc);
 #endif

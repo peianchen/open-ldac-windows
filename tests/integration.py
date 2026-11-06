@@ -91,6 +91,46 @@ def main():
                                  capture_output=True, timeout=30)
         assert process.returncode != 0 and source.read_bytes() == original
         checks += 1
+        for rate in [44100, 48000, 88200, 96000]:
+            highest = 909 if rate in (44100, 88200) else 990
+            process = subprocess.run([str(exe), "bitrates", str(rate)], capture_output=True, text=True, timeout=30)
+            assert process.returncode == 0, process.stderr
+            choices = json.loads(process.stdout)
+            assert choices["supported_kbps"] == [highest, highest * 2 // 3, highest // 3]
+            assert choices["default_kbps"] == highest and choices["battery_downgrade"] is False
+            checks += 1
+            source.write_bytes(wave(rate))
+            fixture = source.read_bytes()
+            for mode, frame_size in [(0, 330), (1, 220), (2, 110)]:
+                target = root / "numeric.ldac"
+                kbps = highest * (3 - mode) // 3
+                process = subprocess.run([str(exe), "encode", str(source), str(target), "--bitrate", str(kbps)],
+                                         capture_output=True, text=True, timeout=30)
+                assert process.returncode == 0, process.stderr
+                info = json.loads(process.stdout)
+                assert info["requested_kbps"] == kbps == info["encoder_kbps"]
+                assert info["eqmid"] == mode and info["bluetooth_transmitted"] is False
+                inspect_frames(target.read_bytes(), rate, frame_size)
+                assert source.read_bytes() == fixture
+                target.unlink(); checks += 1
+            target = root / "default.ldac"
+            process = subprocess.run([str(exe), "encode", str(source), str(target)], capture_output=True, text=True, timeout=30)
+            assert process.returncode == 0 and json.loads(process.stdout)["requested_kbps"] == highest
+            inspect_frames(target.read_bytes(), rate, 330)
+            target.unlink(); checks += 1
+            invalid = ["777", "0", "909" if highest == 990 else "990", "hq", "-1", "990kbps", "429496729600"]
+            for value in invalid:
+                process = subprocess.run([str(exe), "encode", str(source), str(target), "--bitrate", value],
+                                         capture_output=True, timeout=30)
+                assert process.returncode != 0 and not target.exists()
+                assert source.read_bytes() == fixture
+                checks += 1
+        for selector in ["990", "--bitrate"]:
+            args = [str(exe), "bench", "48000", selector] + (["660"] if selector == "--bitrate" else []) + ["1"]
+            process = subprocess.run(args, capture_output=True, text=True, timeout=30)
+            assert process.returncode == 0, process.stderr
+            assert json.loads(process.stdout)["nominal_kbps"] == (660 if selector == "--bitrate" else 990)
+            checks += 1
     print(f"PASS: {checks} WAV/CLI integration cases; LDAC headers inspected, not decoded or transmitted.")
 
 

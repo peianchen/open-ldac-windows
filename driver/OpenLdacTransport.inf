@@ -1,0 +1,58 @@
+; Native transport DEVELOPMENT package. No automatic installer is supplied.
+; Matches the observed WH-1000XM6 Audio Sink model, never the shared radio.
+[Version]
+Signature="$WINDOWS NT$"
+Class=Bluetooth
+ClassGuid={e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Provider=%Provider%
+DriverVer=10/31/2026,0.2.0.0
+CatalogFile=OpenLdacTransport.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DriverCopy=13
+
+[SourceDisksNames]
+1=%Disk%,,,""
+
+[SourceDisksFiles]
+OpenLdacTransport.sys=1
+
+[Manufacturer]
+%Provider%=Models,NTamd64.10.0...22621
+
+[Models.NTamd64.10.0...22621]
+%Description%=Transport,BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}_VID&0002054c_PID&0f8a
+
+[Transport.NT]
+CopyFiles=DriverCopy
+
+[DriverCopy]
+OpenLdacTransport.sys
+
+[Transport.NT.HW]
+AddReg=DeviceSecurity
+
+[DeviceSecurity]
+HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+
+[Transport.NT.Services]
+AddService=OpenLdacTransport,0x00000002,Service
+
+[Service]
+DisplayName=%Description%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\OpenLdacTransport.sys
+
+[Transport.NT.Wdf]
+KmdfService=OpenLdacTransport,Framework
+
+[Framework]
+KmdfLibraryVersion=1.33
+
+[Strings]
+Provider="Open LDAC Windows contributors"
+Disk="Open LDAC Windows development transport"
+Description="Open LDAC Windows experimental XM6 transport"

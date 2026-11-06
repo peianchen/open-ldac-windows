@@ -3,6 +3,23 @@
 #define WL_AVDTP_H
 #include <stddef.h>
 #include <stdint.h>
+
+enum wl_avdtp_signal {
+    WL_AVDTP_DISCOVER = 1,
+    WL_AVDTP_GET_CAPABILITIES = 2,
+    WL_AVDTP_SET_CONFIGURATION = 3,
+    WL_AVDTP_OPEN = 6,
+    WL_AVDTP_START = 7,
+    WL_AVDTP_CLOSE = 8,
+    WL_AVDTP_SUSPEND = 9,
+    WL_AVDTP_ABORT = 10
+};
+enum wl_avdtp_message_type {
+    WL_AVDTP_COMMAND = 0,
+    WL_AVDTP_GENERAL_REJECT = 1,
+    WL_AVDTP_ACCEPT = 2,
+    WL_AVDTP_REJECT = 3
+};
 typedef struct {
     uint8_t transaction;
     uint8_t message_type;
@@ -14,7 +31,13 @@ typedef struct {
 int wl_avdtp_parse(const uint8_t *packet, size_t size, wl_avdtp_message *out);
 int wl_avdtp_first_audio_sink(const uint8_t *discover_payload, size_t size, uint8_t *seid);
 int wl_avdtp_ldac_capability(const uint8_t *capability_payload, size_t size, uint8_t codec[8]);
+size_t wl_avdtp_discover(uint8_t transaction, uint8_t *out, size_t capacity);
 size_t wl_avdtp_get_caps(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
 size_t wl_avdtp_set_config(uint8_t transaction, uint8_t remote_seid, uint8_t local_seid,
                           const uint8_t codec[8], uint8_t *out, size_t capacity);
+size_t wl_avdtp_open(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
+size_t wl_avdtp_start(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
+size_t wl_avdtp_suspend(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
+size_t wl_avdtp_close(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
+size_t wl_avdtp_abort(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
 #endif
