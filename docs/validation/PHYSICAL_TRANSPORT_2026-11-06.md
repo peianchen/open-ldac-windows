@@ -59,3 +59,5 @@ USB Support / guest control 正常 → guest 真實藍牙列舉 → 合法簽章
 ## 最後狀態
 
 原始碼、受測 EXE 與完整私有結果已留存。最後乾淨 VM 執行期檢查通過（Secure Boot、BCD、Verifier、專案服務／憑證），正常關機後還原同一 clean snapshot 與原 USB 設定，確認 poweroff。主機目標裝置均為 OK，原 INF／服務／版本一致。Oracle USB Support 保留供後續測試，實驗性 LDAC 驅動未安裝到主機。[實體測試摘要](physical-radio-2026-11-06.json)。
+
+後續：[主機重啟後的 USB 直通對照實驗](POST_REBOOT_USB_2026-11-06.md)。重啟及穩定識別規則仍未讓控制器進入 VM。
