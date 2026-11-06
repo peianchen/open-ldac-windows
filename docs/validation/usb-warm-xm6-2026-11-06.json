@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-06",
+  "observation_cutoff_utc": "2026-11-06T15:51:10Z",
+  "scope": "physical_usb_handover_pairing_and_sdp_only",
+  "upstream": {
+    "product": "Oracle VirtualBox",
+    "version": "7.2.22",
+    "revision": "r175245",
+    "release_commit": "1a6d24cb4a45f57aabfbad86811553e004f060f7",
+    "source_review_only": true
+  },
+  "private_warm_capture_trial": {
+    "inquiry_exit": 0,
+    "pre_capture_power_state": 1,
+    "inquiry_and_radio_handles_closed": true,
+    "attach_exit": 0,
+    "actual_vm_attached": true,
+    "host_proxy_device_count": 1,
+    "guest_target_usb_device_count": 2,
+    "guest_radio_ok": true,
+    "detach_exit": 0,
+    "host_restored_reported": true,
+    "pairing_changed_in_this_trial": false,
+    "experimental_driver_installed": false
+  },
+  "pairing": {
+    "explicit_user_authorization": true,
+    "headset": "WH-1000XM6",
+    "initial_authentication_result": 1244,
+    "initial_callback_authentication_result": 1244,
+    "initial_callback_response_sentinel_unchanged": true,
+    "corrected_authentication_result": 0,
+    "corrected_callback_method": 3,
+    "corrected_io_capability": 3,
+    "corrected_response_result": 0,
+    "response_uses_optional_null_radio_parameter": true,
+    "headset_pairing_state_not_reverted_by_vm_snapshot": true
+  },
+  "fresh_sdp": {
+    "actual_vm_attached": true,
+    "pre_capture_power_state": 1,
+    "flush_cache_requested": true,
+    "audio_sink": {
+      "error": 0,
+      "record_count": 1,
+      "blob_bytes": 67,
+      "enumeration_complete": true
+    },
+    "l2cap_service_search": {
+      "error": 234,
+      "record_count": 16,
+      "blob_bytes": 1547,
+      "enumeration_complete": false,
+      "probe_record_limit": 16,
+      "error_origin": "probe_sets_ERROR_MORE_DATA_at_record_limit",
+      "does_not_prove_headset_unsupported": true,
+      "does_not_open_audio_l2cap_channels": true
+    },
+    "detach_exit": 0,
+    "host_radio_healthy_after_detach": true,
+    "experimental_driver_installed": false
+  },
+  "guest_stock_audio_sink": {
+    "present": true,
+    "status": "OK",
+    "problem_code": 0,
+    "service": "BthA2dp",
+    "inf": "microsoft_bluetooth_a2dp_src.inf",
+    "driver_version": "10.0.26100.1",
+    "observed_hardware_id_form": "audio_sink_service_LOCALMFG",
+    "production_inf_match_verified": false,
+    "binding_gate": "resolve_model_specific_INF_vs_guest_LOCALMFG_service_ID"
+  },
+  "public_tool": {
+    "path": "tools/vbox-warm-usb-trial.ps1",
+    "first_live_trial_stage": "preflight",
+    "first_live_trial_capture_attempts": 0,
+    "first_live_trial_failure": "optional_PnP_service_property_missing_Data_under_StrictMode",
+    "fix": "inspect_optional_property_presence_keep_query_errors_and_exact_radio_gate_fail_closed",
+    "post_fix_nonhardware_fixtures_passed": 9,
+    "syntax_check_passed": true,
+    "x64_struct_sizes_bytes": [
+      40,
+      560,
+      520
+    ],
+    "attachment_predicate_fixtures_passed": 5,
+    "early_guard_fixtures_passed": 2,
+    "post_fix_physical_trial": {
+      "started_utc": "2026-11-06T15:49:57.6258052Z",
+      "finished_utc": "2026-11-06T15:51:10.3964440Z",
+      "capture_attempts": 1,
+      "inquiry_exit": 0,
+      "pre_capture_power_state": 1,
+      "handles_closed": true,
+      "actual_vm_attached": true,
+      "new_proxy_ok": true,
+      "detach_exit": 0,
+      "host_restored": true,
+      "pairing_changed": false,
+      "experimental_driver_installed": false,
+      "verdict": "HOST_USB_TRIAL_PASSED_GUEST_UNVERIFIED"
+    },
+    "guest_gate": "NOT_PERFORMED_BY_THIS_TOOL"
+  },
+  "not_established_by_this_report": [
+    "unique_root_cause_of_prior_USB_failure",
+    "cold_boot_or_sleep_resume_reliability",
+    "production_transport_signature_or_guest_load",
+    "production_transport_BthPort_callbacks",
+    "AVDTP_codec_negotiation",
+    "dual_L2CAP_audio_channels",
+    "LDAC_playback_or_listening",
+    "manual_bitrate_hardware_interoperability",
+    "battery_power_or_audio_quality_measurements",
+    "Windows_audio_endpoint",
+    "daily_host_installation_acceptance"
+  ],
+  "privacy": {
+    "raw_logs_published": false,
+    "device_addresses_or_serials_published": false,
+    "vm_identifiers_published": false,
+    "credentials_or_pairing_keys_published": false
+  },
+  "later_tool_revision": {
+    "refreshed_inventory_after_inquiry": true,
+    "unique_identity_required": true,
+    "offline_guard_fixtures_passed": 11,
+    "latest_whole_tool_physically_revalidated": false,
+    "followup_report": "XM6_CONNECT_FIX_2026-11-07.md"
+  }
+}

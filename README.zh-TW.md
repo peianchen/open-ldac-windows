@@ -1,10 +1,10 @@
 # Open LDAC Windows
 
-最新進度：[耳機主動控制與有界重連](docs/PEER_CONTROL_RECONNECT.md)、[隔離驗證](docs/validation/PEER_CONTROL_RECONNECT_2026-11-06.md)。AVRCP 按鍵與實際 XM6 播放仍待驗證。
+最新實體進度：[CONNECT 修正、990 kbps XM6 發送與聆聽紀錄](docs/validation/XM6_CONNECT_FIX_2026-11-07.md)。隔離 Windows VM 的實驗性原生傳輸已透過內建 MediaTek 藍牙送出短立體聲測試音；使用者確認「兩耳都有聽到，音量合適」。USB／SDP／CONNECT 的先前失敗仍保留；AVRCP 按鍵、長時間穩定性、音質與耗電量測仍待驗證。
 
 開發透過 Windows 原生藍牙堆疊播放 LDAC 的開源專案，將筆電的音質與耗電同時列為核心需求。
 
-**目前包含 M0 離線核心與驗證中的 M1 原生傳輸。隔離 VM 的合成核心基準與標準 Verifier 案例已通過；尚未在日用 Windows 安裝 LDAC 驅動，也未完成實機耳機播放或 Windows 音訊端點。**
+**目前包含 M0 離線核心與實驗性原生傳輸；已在隔離 VM 安裝並完成短片段 990 kbps XM6 發送與使用者雙耳可聞性確認。日用筆電主機未安裝實驗性驅動，Windows 音訊端點與正式安裝程式仍未完成。合成核心／Verifier、實體傳輸與主觀聆聽各有獨立證據，不能彼此取代。**
 
 ## 研究背景、開發教學與心得
 
@@ -31,7 +31,8 @@
 - 整合固定版本的 AOSP／Sony LDAC 編碼器，保留 Apache-2.0 授權與 NOTICE。
 - 44.1／48／88.2／96 kHz 立體聲 WAV 離線編碼；支援 PCM16／24／32 與 float32。
 - 基本 AVDTP 解析／設定封包、LDAC 能力選擇、RTP／LDAC 封包組裝。
-- 有界 [AVDTP 協商模組](docs/AVDTP_SESSION.md)：逐端點查詢、精確採樣率、媒體 ready 與錯誤退場；目前僅離線測試。
+- 有界 [AVDTP 協商模組](docs/AVDTP_SESSION.md)：逐端點查詢、精確採樣率、媒體 ready 與錯誤退場；48 kHz／990 kbps 短測試音路徑已在 VM 與 XM6 實測，但不代表完整 AVDTP 相容性。
+- 實驗性真實 XM6 發送：2 秒立體聲測試音完成 990 kbps 發送、正常關閉與資源退休，後續取得使用者雙耳聽到確認。手動 660／330 kbps 及播放中切換尚未實體驗證。
 - 音質／省電策略、核心與檔案整合測試、可重現的離線 CPU 比較工具。
 
 筆電預設策略：
@@ -48,8 +49,8 @@
 M1 已加入針對 XM6 音訊服務的 KMDF／L2CAP 傳輸、版本化介面與探索工具，
 詳見 [原生傳輸說明](driver/README.md)。微軟範例衍生的傳輸原始碼採 MS-PL，其他原創核心採 Apache-2.0。
 
-後續工作包括原生傳輸實機驗證、完整 AVDTP 狀態機、Windows 音訊端點、
-正式端點／服務整合、實機播放、休眠恢復及筆電耗電驗證。WAV／SCM 工作服務原型已加入，
-所列本機與 VM 結果不能當成上述實機工作已完成。
+後續工作包括擴大原生傳輸實體測試、完整 AVDTP 相容性、Windows 音訊端點、
+正式端點／服務整合、較長時間播放、斷線重連、休眠恢復及筆電耗電驗證。WAV／SCM 工作服務原型已加入；
+目前短測試音的主觀可聞性不等於音質、續航或日用穩定性驗收，也不代表一般 Windows 應用程式已能選用此音訊端點。
 
 - [實體藍牙通道準備、失敗恢復與斷線碼修正](docs/validation/PHYSICAL_TRANSPORT_2026-11-06.md)

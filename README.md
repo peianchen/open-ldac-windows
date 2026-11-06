@@ -1,6 +1,6 @@
 # Open LDAC Windows
 
-最新進度：[耳機主動控制與有界重連](docs/PEER_CONTROL_RECONNECT.md)、[隔離驗證](docs/validation/PEER_CONTROL_RECONNECT_2026-11-06.md)。AVRCP 按鍵與實際 XM6 播放仍待驗證。
+Latest physical result: [CONNECT fix, 990 kbps XM6 streaming and listening record](docs/validation/XM6_CONNECT_FIX_2026-11-07.md). An experimental native transport installed only in an isolated Windows VM sent short stereo test tones through the built-in MediaTek radio; the user confirmed hearing both ears at an appropriate volume. Earlier USB, SDP and CONNECT failures remain recorded. This is not measured fidelity, battery life or long-term reliability.
 
 [繁體中文](README.zh-TW.md)
 
@@ -17,19 +17,24 @@ Previous: [deferred OPEN cancellation and two Verifier profiles, 2026-11-03](doc
 An independent open-source project developing LDAC playback through Windows'
 native Bluetooth stack, with laptop power consumption treated as a core requirement.
 
-**Development: M0 offline core plus an M1 native transport under validation.
-There is no installed LDAC audio driver or Windows audio endpoint yet.
-Native transport code/build results are not playback evidence.**
+**Development: offline core and an experimental VM-only native transport, with
+short 990 kbps XM6 streaming and user-reported bilateral audibility verified.
+No experimental driver is installed on the daily-use host; the Windows audio
+endpoint and release installer are not implemented. Build results alone remain
+distinct from the recorded hardware and listening evidence.**
 
 ## What works in this milestone
 
 - Real LDAC encoding using pinned AOSP/Sony `libldac` source, with complete license
   and notice files. Original project glue is Apache-2.0.
 - Stereo PCM16/24/32 and float32 RIFF WAV input at 44.1/48/88.2/96 kHz. Writes
-  concatenated LDAC transport frames; no resampling, decoding, or Bluetooth output.
+  concatenated LDAC transport frames; this offline encode command does not resample, decode, or transmit Bluetooth audio.
 - LDAC capability selection, basic single-packet AVDTP discovery/capability
   parsing and configuration builders, and bounded RTP/LDAC media packet assembly.
-- A bounded single-packet [AVDTP initiator session](docs/AVDTP_SESSION.md): endpoint traversal, exact PCM rate, media-ready gating and terminal error handling; offline tests only.
+- A bounded single-packet [AVDTP initiator session](docs/AVDTP_SESSION.md): endpoint traversal, exact PCM rate, media-ready gating and terminal error handling. A short 48 kHz/990 kbps XM6 path has now been exercised through the VM transport; this is not complete AVDTP compliance.
+- Experimental real XM6 playback of 2-second stereo test tones at 990 kbps, with
+  sender completion, normal channel retirement, and later user-reported hearing
+  in both ears. The transport was installed in the isolated VM only.
 - Explicit quality/power policy and a reproducible offline encoder CPU benchmark.
 - Tests for malformed input, MTU limits, packet rollover, codec configurations,
   file preservation and frame headers. Tests do not prove audio quality or playback.
@@ -86,7 +91,8 @@ battery hours, RF retransmissions, or listening scores are measured**.
 Manual numeric selection supports 990/660/330 kbps for the 48/96 kHz family and
 909/606/303 kbps for 44.1/88.2 kHz. Omitting the encode selector defaults to HQ.
 The user-mode API supports serialized encoder-mode changes, and the experimental
-SCM worker queues manual requests. Real-headset behavior remains unverified.
+SCM worker queues manual requests. Short real-headset trials verified the fixed
+990 kbps setting; other numeric rates and live bitrate switching remain unverified.
 See [bitrate control](docs/BITRATE_CONTROL.md).
 
 ## Native Windows driver roadmap
@@ -94,11 +100,11 @@ See [bitrate control](docs/BITRATE_CONTROL.md).
 | Milestone | Deliverable | Status |
 | --- | --- | --- |
 | M0 | Offline codec, protocol primitives, quality/power policy and tests | Implemented; see verification report |
-| M1 | KMDF L2CAP transport, XM6-specific INF and discovery probe | Source implemented; build/runtime validation tracked separately |
-| M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Bounded initiator/native-worker prototype; real headset not verified |
+| M1 | KMDF L2CAP transport, XM6-specific INF and discovery probe | Experimental VM load and real XM6 signaling verified; VM-only INF variant guarded separately |
+| M2 | Complete AVDTP state machine and LDAC streaming to a real headset | Bounded path: short 990 kbps XM6 tone streaming and user hearing confirmed; full compliance and extended testing pending |
 | M3 | Windows audio endpoint and event-driven user-mode encoding service | WAV/SCM worker prototype exists; Windows PCM endpoint not implemented |
 | M4 | Power/latency/glitch measurements, suspend/resume and coexistence | Not measured |
-| M5 | Signed, reviewed installer and recovery path | Not implemented |
+| M5 | Release-signed, reviewed installer and recovery path | Guest-only test signing and guarded installation exercised; release installer not implemented |
 
 The design keeps the existing Windows Bluetooth radio/transport drivers and
 uses public Bluetooth profile DDIs. It does not claim that a registry key adds a
@@ -106,9 +112,10 @@ codec to Microsoft's A2DP driver. See [native architecture](docs/NATIVE_ARCHITEC
 and [driver build prerequisites](driver/README.md).
 An isolated real-WDF lab with a synthetic provider passed its baseline and targeted
 standard Verifier cases on `36bc35f`; see the [executed record](docs/validation/KERNEL_LAB_2026-11-01.md).
-Real BthPort/PnP, additional fault profiles and hardware acceptance remain pending;
-see the [kernel test matrix](docs/KERNEL_TEST_MATRIX.md). Host adapter tests and
-the synthetic provider do not establish real Bluetooth or headset compatibility.
+Real BthPort/PnP loading and the short XM6 path now have separate hardware evidence.
+Additional fault profiles, long-duration operation and general hardware acceptance
+remain pending; see the [kernel test matrix](docs/KERNEL_TEST_MATRIX.md). Host
+adapter tests and the synthetic provider alone do not establish compatibility.
 
 ## License and provenance
 
