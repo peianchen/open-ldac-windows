@@ -93,7 +93,7 @@ static int bitrate_request(const wl_playback_io *io, wl_encoder *enc,
 }
 static int media_output(const wl_playback_io *io, wl_encoder *enc,
                         wl_rtp_state *rtp, const wl_encoded *encoded,
-                        wl_playback_report *r) {
+                        wl_playback_report *r, unsigned *last_packet_samples) {
     uint8_t packet[WL_PLAY_MAX_MTU];
     size_t size;
     uint64_t offset;
@@ -110,6 +110,7 @@ static int media_output(const wl_playback_io *io, wl_encoder *enc,
     if (io->wait_samples(io->context, offset, enc->rate)) return io_failure(io);
     if (stopped(io)) return WL_PLAY_STOPPED;
     if (io->send(io->context, WL_MEDIA, packet, size, WL_PLAY_TIMEOUT_MS)) return io_failure(io);
+    *last_packet_samples = (unsigned)encoded->frames * rtp->samples_per_frame;
     r->encoded_frames += (unsigned)encoded->frames;
     ++r->media_packets; r->media_bytes += size;
     return stopped(io) ? WL_PLAY_STOPPED : WL_PLAY_OK;
@@ -122,11 +123,12 @@ int wl_playback_run(const wl_playback_io *io, const wl_pcm_source *source,
     wl_rtp_state rtp = {0};
     _Alignas(16) uint8_t pcm[128u * 2u * 4u];
     unsigned bytes, signaling_out = 0, signaling_in = 0, media_out = 0, media_in = 0;
-    int result = WL_PLAY_ARGUMENT, mode, entered_io = 0, padded = 0, drained = 0;
+    unsigned last_packet_samples = 0;
+    int result = WL_PLAY_ARGUMENT, mode, entered_io = 0, media_closed = 0, padded = 0, drained = 0;
     if (!report) return WL_PLAY_ARGUMENT;
     memset(report, 0, sizeof(*report)); report->result = WL_PLAY_ARGUMENT;
     if (!io || !source || !options || !io->open || !io->send || !io->receive ||
-        !io->wait_samples || !io->stopped || !io->close || !source->read ||
+        !io->wait_samples || !io->finish_media || !io->stopped || !io->close || !source->read ||
         !(bytes = sample_bytes(source->format)) || !wl_bitrate_kbps(source->rate, LDACBT_EQMID_HQ))
         return WL_PLAY_ARGUMENT;
     report->requested_kbps = options->bitrate_kbps ? options->bitrate_kbps : wl_bitrate_kbps(source->rate, LDACBT_EQMID_HQ);
@@ -180,7 +182,7 @@ int wl_playback_run(const wl_playback_io *io, const wl_pcm_source *source,
         }
         if (wl_encoder_push(&encoder, pcm, &encoded)) {result = codec_failure(report, &encoder); goto done;}
         report->actual_kbps = (unsigned)wl_encoder_bitrate(&encoder);
-        result = media_output(io, &encoder, &rtp, &encoded, report);
+        result = media_output(io, &encoder, &rtp, &encoded, report, &last_packet_samples);
         if (result) goto done;
     }
     for (unsigned i = 0; i < 32; ++i) {
@@ -191,29 +193,31 @@ int wl_playback_run(const wl_playback_io *io, const wl_pcm_source *source,
         if (wl_encoder_push(&encoder, NULL, &encoded)) {result = codec_failure(report, &encoder); goto done;}
         report->actual_kbps = (unsigned)wl_encoder_bitrate(&encoder);
         if (!encoded.size) {drained = 1; break;}
-        result = media_output(io, &encoder, &rtp, &encoded, report);
+        result = media_output(io, &encoder, &rtp, &encoded, report, &last_packet_samples);
         if (result) goto done;
     }
     if (!drained) {result = codec_failure(report, &encoder); goto done;}
     if (stopped(io)) {result = WL_PLAY_STOPPED; goto done;}
-    /* Include codec lookahead/padding duration, not only original PCM length. */
-    if (io->wait_samples(io->context, report->encoded_frames * rtp.samples_per_frame, source->rate)) {
+    /* Include codec lookahead/padding and a final packet whose write completed
+     * late. Receiver buffering remains a separate physical validation gate. */
+    if (io->finish_media(io->context, report->encoded_frames * rtp.samples_per_frame,
+                         last_packet_samples, source->rate)) {
         result = io_failure(io); goto done;
     }
     if (stopped(io)) {result = WL_PLAY_STOPPED; goto done;}
-    if (wl_avdtp_session_request_suspend(&session)) {
+    if (wl_avdtp_session_request_close(&session)) {
         result = protocol_failure(report, WL_AVDTP_SESSION_INVALID_STATE); goto done;
     }
-    result = drive(io, &session, WL_AVDTP_SESSION_SUSPENDED, signaling_in, report);
-    if (result) goto done;
-    if (wl_avdtp_session_request_abort(&session)) {
-        result = protocol_failure(report, WL_AVDTP_SESSION_INVALID_STATE); goto done;
+    result = drive(io, &session, WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE, signaling_in, report);
+    if (!result) {
+        io->close(io->context, WL_MEDIA); media_closed = 1;
+        if (wl_avdtp_session_media_closed(&session, options->generation))
+            result = protocol_failure(report, WL_AVDTP_SESSION_INVALID_STATE);
     }
-    result = drive(io, &session, WL_AVDTP_SESSION_ABORTED, signaling_in, report);
     if (!result) report->stage = (unsigned)session.state;
 done:
     wl_encoder_close(&encoder);
-    if (entered_io) {io->close(io->context, WL_MEDIA); io->close(io->context, WL_SIGNALING);}
+    if (entered_io) {if (!media_closed) io->close(io->context, WL_MEDIA); io->close(io->context, WL_SIGNALING);}
     report->result = result;
     return result;
 }

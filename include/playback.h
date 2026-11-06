@@ -19,6 +19,11 @@ typedef struct {
      * events and observe stop/peer disconnect. Lateness beyond the adapter's
      * documented tolerance must fail rather than drop audio/lower quality. */
     int (*wait_samples)(void *, uint64_t offset, unsigned sample_rate);
+    /* EOF only: wait through both the nominal end and at least the final
+     * packet duration after its successful transport completion. This is a
+     * sender drain, not acknowledgement of receiver playout. Empty media uses
+     * zero end/final samples. Observe stop/peer loss and retain signaling. */
+    int (*finish_media)(void *, uint64_t end_offset, unsigned final_packet_samples, unsigned sample_rate);
     int (*stopped)(void *);
     /* Optional owner-thread read of an explicit user request; 0=no change.
      * Never derive it from AC/battery state. */

@@ -24,7 +24,10 @@ typedef enum {
     WL_AVDTP_SESSION_SUSPENDED,
     WL_AVDTP_SESSION_ABORT,
     WL_AVDTP_SESSION_ABORTED,
-    WL_AVDTP_SESSION_FAILED
+    WL_AVDTP_SESSION_FAILED,
+    WL_AVDTP_SESSION_CLOSE,
+    WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE,
+    WL_AVDTP_SESSION_CLOSED
 } wl_avdtp_session_state;
 
 typedef enum {
@@ -97,6 +100,14 @@ int wl_avdtp_session_receive(wl_avdtp_session *session, uint64_t generation,
 int wl_avdtp_session_media_ready(wl_avdtp_session *session, uint64_t generation);
 int wl_avdtp_session_request_suspend(wl_avdtp_session *session);
 int wl_avdtp_session_request_resume(wl_avdtp_session *session);
+/* Normal release from established OPEN (START before emission or SUSPENDED)
+ * or STREAMING. CLOSE accept reaches WAIT_MEDIA_CLOSE, not completion. The
+ * owner must retire its local media I/O and handle before reporting
+ * media_closed; only then is this single-use session terminal. That report
+ * does not attest asynchronous lower-driver or peer L2CAP teardown. Signaling is also closed by its
+ * owner before a new generation, as for all terminal states in this subset. */
+int wl_avdtp_session_request_close(wl_avdtp_session *session);
+int wl_avdtp_session_media_closed(wl_avdtp_session *session, uint64_t generation);
 /* BUSY while a command is outstanding. Before configuration, abort is local
  * terminal cleanup; after configuration an ABORT command must be accepted. */
 int wl_avdtp_session_request_abort(wl_avdtp_session *session);

@@ -20,14 +20,22 @@ both a deterministic test peer and a real Windows implementation:
 5. Feed bounded 128-frame PCM blocks; pad only the last short block, then drain
    the codec with a finite limit. Packet offsets use encoded sample duration,
    including codec lookahead/padding, rather than a per-packet Sleep loop.
-6. On normal EOF, wait for the final encoded sender duration, then SUSPEND and ABORT.
+6. On normal EOF, wait until the later of the encoded sample endpoint and
+   the last successful media-write completion plus that packet's duration.
+   Send CLOSE, require its matching acceptance, then retire the local media
+   handle before signaling. CLOSE acceptance alone is not local retirement.
    Every exit closes media before signaling. Stop/error does not start new
    best-effort signaling transactions while cancellation is in progress.
 
-The EOF wait is a sender timeline, not confirmation that a headset has rendered
-its jitter-buffer tail. Delay reporting, graceful stream closure and real
-tail-audio capture still need interoperability work; this prototype does not
-claim an audibly complete final sample on XM6.
+The EOF wait uses upward-rounded QPC deadlines and one-shot timers, preserving
+stop/disconnect monitoring. It is a sender timing lower bound, not confirmation
+that a headset has rendered its jitter-buffer tail. No guessed receiver latency
+is added. The 40 ms streaming lateness limit remains unchanged; terminal drain
+may finish late rather than cutting short a successfully transmitted final packet.
+CLOSE acceptance plus local I/O/handle retirement does not prove the kernel's
+asynchronous BRB close or peer L2CAP disconnect has completed. Delay reporting,
+real closure traces and tail-audio capture remain physical validation gates.
+See the [2026-11-06 drain/CLOSE report](validation/GRACEFUL_CLOSE_2026-11-06.md).
 
 Two existing kernel handles already provide separate L2CAP channels on assigned
 PSM 0x0019. This iteration does not change the kernel ABI, driver binary or INF.

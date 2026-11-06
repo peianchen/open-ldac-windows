@@ -26,6 +26,7 @@ static uint8_t state_signal(wl_avdtp_session_state state) {
     case WL_AVDTP_SESSION_START: return WL_AVDTP_START;
     case WL_AVDTP_SESSION_SUSPEND: return WL_AVDTP_SUSPEND;
     case WL_AVDTP_SESSION_ABORT: return WL_AVDTP_ABORT;
+    case WL_AVDTP_SESSION_CLOSE: return WL_AVDTP_CLOSE;
     default: return 0;
     }
 }
@@ -75,6 +76,8 @@ size_t wl_avdtp_session_next_command(wl_avdtp_session *s,
         length = wl_avdtp_suspend(transaction, s->remote_seid, out, capacity); break;
     case WL_AVDTP_ABORT:
         length = wl_avdtp_abort(transaction, s->remote_seid, out, capacity); break;
+    case WL_AVDTP_CLOSE:
+        length = wl_avdtp_close(transaction, s->remote_seid, out, capacity); break;
     default: return 0;
     }
     if (!length) return 0;
@@ -205,6 +208,8 @@ int wl_avdtp_session_receive(wl_avdtp_session *s, uint64_t generation,
         s->state = WL_AVDTP_SESSION_STREAMING; break;
     case WL_AVDTP_SUSPEND:
         s->state = WL_AVDTP_SESSION_SUSPENDED; break;
+    case WL_AVDTP_CLOSE:
+        s->state = WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE; break;
     case WL_AVDTP_ABORT:
         s->state = WL_AVDTP_SESSION_ABORTED; s->transport_valid = 0; break;
     default: return fail(s, WL_AVDTP_SESSION_INVALID_STATE);
@@ -239,6 +244,23 @@ int wl_avdtp_session_request_abort(wl_avdtp_session *s) {
     if (s->pending) return WL_AVDTP_SESSION_BUSY;
     if (s->configured) s->state = WL_AVDTP_SESSION_ABORT;
     else {s->state = WL_AVDTP_SESSION_ABORTED; s->transport_valid = 0;}
+    return WL_AVDTP_SESSION_OK;
+}
+int wl_avdtp_session_request_close(wl_avdtp_session *s) {
+    if (!s) return WL_AVDTP_SESSION_INVALID_ARGUMENT;
+    if (!s->transport_valid) return WL_AVDTP_SESSION_TRANSPORT_INVALID;
+    if (s->pending) return WL_AVDTP_SESSION_BUSY;
+    if (s->state != WL_AVDTP_SESSION_STREAMING && s->state != WL_AVDTP_SESSION_SUSPENDED &&
+        s->state != WL_AVDTP_SESSION_START)
+        return WL_AVDTP_SESSION_INVALID_STATE;
+    s->state = WL_AVDTP_SESSION_CLOSE; return WL_AVDTP_SESSION_OK;
+}
+int wl_avdtp_session_media_closed(wl_avdtp_session *s, uint64_t generation) {
+    int result = epoch(s, generation);
+    if (result) return result;
+    if (s->pending || s->state != WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE)
+        return WL_AVDTP_SESSION_INVALID_STATE;
+    s->configured = 0; s->transport_valid = 0; s->state = WL_AVDTP_SESSION_CLOSED;
     return WL_AVDTP_SESSION_OK;
 }
 static int token_matches(const wl_avdtp_session *s, const wl_avdtp_session_token *token) {

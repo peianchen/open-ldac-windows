@@ -10,6 +10,7 @@ enum wl_avdtp_signal {
     WL_AVDTP_SET_CONFIGURATION = 3,
     WL_AVDTP_OPEN = 6,
     WL_AVDTP_START = 7,
+    WL_AVDTP_CLOSE = 8,
     WL_AVDTP_SUSPEND = 9,
     WL_AVDTP_ABORT = 10
 };
@@ -37,5 +38,6 @@ size_t wl_avdtp_set_config(uint8_t transaction, uint8_t remote_seid, uint8_t loc
 size_t wl_avdtp_open(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
 size_t wl_avdtp_start(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
 size_t wl_avdtp_suspend(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
+size_t wl_avdtp_close(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
 size_t wl_avdtp_abort(uint8_t transaction, uint8_t remote_seid, uint8_t *out, size_t capacity);
 #endif

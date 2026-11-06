@@ -196,9 +196,114 @@ static int timer_and_validation_tests(void) {
     CHECK(GetLastError()==ERROR_INVALID_PARAMETER);
     return 0;
 }
+typedef struct {HANDLE server;LARGE_INTEGER before_read;DWORD error,bytes;} delayed_reader;
+static DWORD WINAPI delayed_peer_read(void *context) {
+    delayed_reader *reader=(delayed_reader *)context;OVERLAPPED ov={0};uint8_t packet[OL_MAX_PACKET];
+    Sleep(50);
+    QueryPerformanceCounter(&reader->before_read);
+    ov.hEvent=CreateEventW(NULL,TRUE,FALSE,NULL);
+    if(!ov.hEvent){reader->error=GetLastError();return 1;}
+    if(!ReadFile(reader->server,packet,sizeof(packet),&reader->bytes,&ov)) {
+        reader->error=GetLastError();
+        if(reader->error==ERROR_IO_PENDING)
+            reader->error=GetOverlappedResult(reader->server,&ov,&reader->bytes,TRUE)?0:GetLastError();
+    }
+    CloseHandle(ov.hEvent);return reader->error?1:0;
+}
+static int attach_media_alias(pipe_fixture *p) {
+    HANDLE duplicate;
+    CHECK(DuplicateHandle(GetCurrentProcess(),p->io->handles[0],GetCurrentProcess(),&duplicate,0,FALSE,DUPLICATE_SAME_ACCESS));
+    p->io->handles[WL_MEDIA]=duplicate;
+    p->io->out_mtu[WL_MEDIA]=p->io->in_mtu[WL_MEDIA]=OL_MAX_PACKET;
+    return 0;
+}
+static int terminal_drain_tests(void) {
+    pipe_fixture p;LONGLONG target;LARGE_INTEGER ended;HANDLE thread;
+    delayed_reader reader={0};uint8_t packet[OL_MAX_PACKET]={0};wl_playback_io bound;
+    CHECK(terminal_target(1,1,44100,10000000,&target)==0 && target==228);
+    CHECK(terminal_target(0,48000,48000,10000000,&target)==0 && target==10000000);
+    CHECK(terminal_target(LLONG_MAX,1,48000,10000000,&target)==ERROR_ARITHMETIC_OVERFLOW);
+    CHECK(terminal_target(0,UINT64_MAX,48000,10000000,&target)==ERROR_ARITHMETIC_OVERFLOW);
+    CHECK(terminal_target(-1,0,48000,10000000,&target)==ERROR_INVALID_PARAMETER);
+    CHECK(terminal_target(0,0,0,10000000,&target)==ERROR_INVALID_PARAMETER);
+    CHECK(make_pipe(&p)==0);
+    wl_win_native_bind(p.io,&bound);CHECK(bound.finish_media==native_finish_media);
+    CHECK(native_finish_media(p.io,0,0,123)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    CHECK(native_finish_media(p.io,1,0,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_STATE);
+    CHECK(native_finish_media(p.io,0,0,48000)==0);
+    CHECK(!p.io->clock_started && !p.io->monitor_armed && p.io->media_finished);
+    CHECK(native_finish_media(p.io,0,0,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_STATE);
+    close_pipe(&p);
+
+    CHECK(make_pipe(&p)==0);CHECK(attach_media_alias(&p)==0);
+    CHECK(QueryPerformanceCounter(&p.io->anchor));
+    p.io->anchor.QuadPart-=p.io->frequency.QuadPart; /* nominal stream end already past */
+    p.io->clock_started=1;p.io->clock_rate=48000;p.io->last_offset=0;
+    /* Fill the owned pipe's 4096-byte outbound quota. The next 1008-byte
+     * WriteFile completes after a delayed peer read frees quota. This is real
+     * OS pipe backpressure, not a claim about Bluetooth transmit timing. */
+    for(unsigned i=0;i<4;++i)CHECK(native_send(p.io,WL_MEDIA,packet,sizeof(packet),1000)==0);
+    reader.server=p.server;
+    thread=CreateThread(NULL,0,delayed_peer_read,&reader,0,NULL);CHECK(thread!=NULL);
+    CHECK(native_send(p.io,WL_MEDIA,packet,sizeof(packet),2000)==0);
+    CHECK(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
+    CHECK(reader.error==0 && reader.bytes==sizeof(packet));
+    CHECK(p.io->media_written && p.io->last_media_completion.QuadPart>=reader.before_read.QuadPart);
+    CHECK(terminal_target(p.io->last_media_completion.QuadPart,1920,48000,p.io->frequency.QuadPart,&target)==0);
+    CHECK(native_finish_media(p.io,1920,1920,48000)==0);
+    CHECK(QueryPerformanceCounter(&ended));CHECK(ended.QuadPart>=target);
+    CHECK(p.io->monitor_armed && p.io->monitor.active && p.io->media_finished);
+    CHECK(native_send(p.io,WL_MEDIA,packet,1,1000)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_STATE);
+    {
+        const uint8_t closed[]={0x12,8};uint8_t response[OL_MAX_PACKET];size_t bytes=0;
+        CHECK(peer_write(&p,closed,sizeof(closed))==0);
+        CHECK(native_receive(p.io,WL_SIGNALING,response,sizeof(response),&bytes,1000)==0);
+        CHECK(bytes==sizeof(closed) && !memcmp(response,closed,bytes));
+        CHECK(!p.io->monitor.active && !p.io->monitor_armed);
+    }
+    close_pipe(&p);
+
+    /* Exercise the other max() branch: a fixture-seeded future absolute
+     * sample timeline dominates the actual write-completion duration. Check
+     * only the lower bound, never a VM-sensitive upper scheduling bound. */
+    CHECK(make_pipe(&p)==0);CHECK(attach_media_alias(&p)==0);
+    CHECK(native_send(p.io,WL_MEDIA,packet,1,1000)==0);
+    CHECK(QueryPerformanceCounter(&p.io->anchor));
+    p.io->anchor.QuadPart+=p.io->frequency.QuadPart/10;
+    p.io->clock_started=1;p.io->clock_rate=48000;p.io->last_offset=0;
+    CHECK(terminal_target(p.io->anchor.QuadPart,1920,48000,p.io->frequency.QuadPart,&target)==0);
+    {
+        LONGLONG from_completion;
+        CHECK(terminal_target(p.io->last_media_completion.QuadPart,1920,48000,p.io->frequency.QuadPart,&from_completion)==0);
+        CHECK(target>from_completion);
+    }
+    CHECK(native_finish_media(p.io,1920,1920,48000)==0);
+    CHECK(QueryPerformanceCounter(&ended));CHECK(ended.QuadPart>=target);
+    CHECK(p.io->media_finished && p.io->monitor.active);
+    close_pipe(&p);
+
+    CHECK(make_pipe(&p)==0);CHECK(attach_media_alias(&p)==0);
+    CHECK(QueryPerformanceCounter(&p.io->anchor));p.io->clock_started=1;p.io->clock_rate=48000;
+    CHECK(native_send(p.io,WL_MEDIA,packet,1,1000)==0);
+    CHECK(native_finish_media(p.io,1920,0,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    CHECK(native_finish_media(p.io,1920,1920,44100)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    CHECK(native_finish_media(p.io,1919,1920,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_INVALID_PARAMETER);
+    /* Future test anchor makes cancellation independent of scheduling speed. */
+    p.io->anchor.QuadPart+=p.io->frequency.QuadPart*60;
+    thread=CreateThread(NULL,0,delayed_stop,p.io->stop,0,NULL);CHECK(thread!=NULL);
+    CHECK(native_finish_media(p.io,1920,1920,48000)!=0 && wl_win_native_last_error(p.io)==ERROR_OPERATION_ABORTED);
+    CHECK(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0);CHECK(CloseHandle(thread));
+    CHECK(!p.io->media_finished);CHECK(ResetEvent(p.io->stop));
+    CHECK(DisconnectNamedPipe(p.server));
+    CHECK(WaitForSingleObject(p.io->monitor.ov.hEvent,1000)==WAIT_OBJECT_0);
+    CHECK(native_finish_media(p.io,1920,1920,48000)!=0);
+    CHECK(wl_win_native_last_error(p.io)==ERROR_BROKEN_PIPE ||
+          wl_win_native_last_error(p.io)==ERROR_PIPE_NOT_CONNECTED || wl_win_native_last_error(p.io)==ERROR_NO_DATA);
+    close_pipe(&p);return 0;
+}
 int main(void) {
     if(pending_and_short_tests() || cancel_timeout_race_tests() || monitor_handoff_tests() || reported_count_bounds_tests() ||
-       peer_failure_tests() || timer_and_validation_tests())return 1;
+       peer_failure_tests() || timer_and_validation_tests() || terminal_drain_tests())return 1;
     printf("{\"kind\":\"real_windows_owned_pipe_native_io_tests\",\"checks\":%u,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false}\n",checks);
     return 0;

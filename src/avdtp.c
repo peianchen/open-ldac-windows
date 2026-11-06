@@ -78,6 +78,9 @@ size_t wl_avdtp_suspend(uint8_t transaction, uint8_t remote, uint8_t *out, size_
 size_t wl_avdtp_abort(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
     return endpoint_command(transaction, remote, WL_AVDTP_ABORT, out, capacity);
 }
+size_t wl_avdtp_close(uint8_t transaction, uint8_t remote, uint8_t *out, size_t capacity) {
+    return endpoint_command(transaction, remote, WL_AVDTP_CLOSE, out, capacity);
+}
 size_t wl_avdtp_set_config(uint8_t transaction, uint8_t remote, uint8_t local,
                           const uint8_t codec[8], uint8_t *out, size_t capacity) {
     uint8_t selected[8];

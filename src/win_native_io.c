@@ -26,8 +26,8 @@ struct wl_win_native_io {
     native_slot operations[2], monitor;
     uint8_t monitor_buffer[OL_MAX_PACKET];
     unsigned out_mtu[2], in_mtu[2];
-    int monitor_armed, clock_started;
-    LARGE_INTEGER frequency, anchor;
+    int monitor_armed, clock_started, media_written, media_finished;
+    LARGE_INTEGER frequency, anchor, last_media_completion;
     uint64_t last_offset;
     unsigned clock_rate;
     volatile LONG *requested;
@@ -201,12 +201,17 @@ static int native_send(void *context,unsigned channel,const uint8_t *packet,size
     if(io->handles[channel]==INVALID_HANDLE_VALUE)return result(io,ERROR_INVALID_HANDLE);
     if(length>io->out_mtu[channel])return result(io,ERROR_BAD_LENGTH);
     if(channel==WL_MEDIA) {
+        if(io->media_finished)return result(io,ERROR_INVALID_STATE);
         if((error=arm_monitor(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
         peer=io->monitor.ov.hEvent;
     }
     error=native_perform(io,io->handles[channel],&io->operations[channel],NATIVE_WRITE,
           0,packet,(DWORD)length,NULL,0,&bytes,timeout,peer);
     if(!error)error=exact_write_result(bytes,length);
+    if(!error && channel==WL_MEDIA) {
+        if(!QueryPerformanceCounter(&io->last_media_completion))error=ERROR_GEN_FAILURE;
+        else io->media_written=1;
+    }
     return result(io,error);
 }
 static int native_receive(void *context,unsigned channel,uint8_t *packet,size_t capacity,size_t *length,unsigned timeout) {
@@ -275,6 +280,62 @@ static int native_wait_samples(void *context,uint64_t offset,unsigned rate) {
          * never turns into an active spin or changes the source sample clock. */
     }
 }
+/* Ceiling conversion is used only for the terminal sender drain. It never
+ * shortens either the absolute encoded duration or the duration measured from
+ * the final successful write completion. This is not a receiver playout ACK. */
+static DWORD terminal_target(LONGLONG anchor,uint64_t samples,unsigned rate,
+                             LONGLONG frequency,LONGLONG *target) {
+    uint64_t seconds,remainder,whole,product,fraction;
+    if(anchor<0 || frequency<=0 || !rate)return ERROR_INVALID_PARAMETER;
+    seconds=samples/rate;remainder=samples%rate;
+    if(seconds>(uint64_t)LLONG_MAX/(uint64_t)frequency ||
+       remainder>UINT64_MAX/(uint64_t)frequency)return ERROR_ARITHMETIC_OVERFLOW;
+    whole=seconds*(uint64_t)frequency;product=remainder*(uint64_t)frequency;
+    fraction=product/rate+(product%rate!=0);
+    if(fraction>(uint64_t)LLONG_MAX-whole ||
+       whole+fraction>(uint64_t)(LLONG_MAX-anchor))return ERROR_ARITHMETIC_OVERFLOW;
+    *target=anchor+(LONGLONG)(whole+fraction);return ERROR_SUCCESS;
+}
+static int native_finish_media(void *context,uint64_t end_offset,
+                               unsigned final_packet_samples,unsigned rate) {
+    wl_win_native_io *io=(wl_win_native_io *)context;
+    LARGE_INTEGER now,due;LONGLONG target,completion_target;DWORD error,wait;
+    HANDLE events[3];
+    if(!io || (rate!=44100 && rate!=48000 && rate!=88200 && rate!=96000))
+        return io?result(io,ERROR_INVALID_PARAMETER):-1;
+    if((error=stopped_error(io))!=0)return result(io,error);
+    if(io->media_finished)return result(io,ERROR_INVALID_STATE);
+    if(!io->media_written) {
+        if(end_offset || final_packet_samples || io->clock_started)return result(io,ERROR_INVALID_STATE);
+        io->media_finished=1;return result(io,ERROR_SUCCESS);
+    }
+    if(!io->clock_started || rate!=io->clock_rate || !final_packet_samples ||
+       final_packet_samples>15u*256u || end_offset<=io->last_offset ||
+       end_offset-io->last_offset!=final_packet_samples ||
+       io->handles[WL_MEDIA]==INVALID_HANDLE_VALUE)return result(io,ERROR_INVALID_PARAMETER);
+    if((error=terminal_target(io->anchor.QuadPart,end_offset,rate,io->frequency.QuadPart,&target))!=0 ||
+       (error=terminal_target(io->last_media_completion.QuadPart,final_packet_samples,rate,
+                              io->frequency.QuadPart,&completion_target))!=0)return result(io,error);
+    if(completion_target>target)target=completion_target;
+    if((error=arm_monitor(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
+    events[0]=io->stop;events[1]=io->monitor.ov.hEvent;events[2]=io->timer;
+    for(;;) {
+        long double remaining;
+        if((error=stopped_error(io))!=0 || (error=monitor_error(io))!=0)return result(io,error);
+        if(!QueryPerformanceCounter(&now))return result(io,ERROR_GEN_FAILURE);
+        if(now.QuadPart>=target){io->media_finished=1;return result(io,ERROR_SUCCESS);}
+        remaining=(long double)(target-now.QuadPart)*10000000.0L/(long double)io->frequency.QuadPart;
+        if(remaining>=(long double)LLONG_MAX-1)return result(io,ERROR_ARITHMETIC_OVERFLOW);
+        due.QuadPart=-(LONGLONG)(remaining+1.0L);
+        if(!SetWaitableTimer(io->timer,&due,0,NULL,NULL,FALSE))return result(io,GetLastError());
+        wait=WaitForMultipleObjects(3,events,FALSE,INFINITE);
+        if(wait==WAIT_OBJECT_0)return result(io,ERROR_OPERATION_ABORTED);
+        if(wait==WAIT_OBJECT_0+1) {
+            error=monitor_error(io);return result(io,error?error:ERROR_CONNECTION_ABORTED);
+        }
+        if(wait!=WAIT_OBJECT_0+2)return result(io,wait==WAIT_FAILED?GetLastError():ERROR_GEN_FAILURE);
+    }
+}
 static int native_stopped(void *context) {
     wl_win_native_io *io=(wl_win_native_io *)context;DWORD error;
     if(!io)return 1;
@@ -296,7 +357,7 @@ static void native_close(void *context,unsigned channel) {
         slot_cancel_drain(io->handles[channel],&io->operations[channel]);
         CloseHandle(io->handles[channel]);io->handles[channel]=INVALID_HANDLE_VALUE;
     }
-    if(channel==WL_MEDIA){(void)CancelWaitableTimer(io->timer);io->clock_started=0;io->last_offset=0;}
+    if(channel==WL_MEDIA){(void)CancelWaitableTimer(io->timer);io->clock_started=0;io->last_offset=0;io->media_written=0;io->media_finished=0;}
     io->out_mtu[channel]=io->in_mtu[channel]=0;
 }
 wl_win_native_io *wl_win_native_create(unsigned index,const wchar_t *path,HANDLE stop,volatile LONG *requested) {
@@ -331,7 +392,7 @@ void wl_win_native_bind(wl_win_native_io *io,wl_playback_io *out) {
     if(!out)return;
     memset(out,0,sizeof(*out));if(!io)return;
     out->context=io;out->open=native_open;out->send=native_send;out->receive=native_receive;
-    out->wait_samples=native_wait_samples;out->stopped=native_stopped;
+    out->wait_samples=native_wait_samples;out->finish_media=native_finish_media;out->stopped=native_stopped;
     out->requested_bitrate=native_requested;out->close=native_close;
 }
 void wl_win_native_destroy(wl_win_native_io *io) {

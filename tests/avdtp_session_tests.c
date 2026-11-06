@@ -9,7 +9,7 @@ static unsigned checks;
     fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); return 1; \
 } } while (0)
 
-enum { DISCOVER=1, GET_CAPS=2, SET_CONFIG=3, OPEN=6, START=7, SUSPEND=9, ABORT=10 };
+enum { DISCOVER=1, GET_CAPS=2, SET_CONFIG=3, OPEN=6, START=7, CLOSE=8, SUSPEND=9, ABORT=10 };
 static const uint8_t sink5[] = {20, 8};
 static const uint8_t ldac[] = {1,0,7,10,0,0xff,0x2d,1,0,0,0xaa,0,0x3c,7};
 static const uint8_t sbc[] = {1,0,7,6,0,0,0x3f,0xff,2,53};
@@ -507,12 +507,118 @@ static int state_and_wrap_tests(void) {
     return 0;
 }
 
+static int close_tests(void) {
+    uint8_t out[4], saved[4];
+    wl_avdtp_session s={0}, before;
+    command c;
+    CHECK(WL_AVDTP_SESSION_FAILED==12); /* Existing diagnostic state values stable. */
+    CHECK(wl_avdtp_session_request_close(NULL)==WL_AVDTP_SESSION_INVALID_ARGUMENT);
+    CHECK(wl_avdtp_session_media_closed(NULL,100)==WL_AVDTP_SESSION_INVALID_ARGUMENT);
+    CHECK(wl_avdtp_session_request_close(&s)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+    for(unsigned label=0;label<16;++label) {
+        memset(out,0xa5,sizeof(out));
+        CHECK(wl_avdtp_close((uint8_t)label,5,out,sizeof(out))==3);
+        CHECK(out[0]==label*16 && out[1]==8 && out[2]==20 && out[3]==0xa5);
+    }
+    memset(out,0xa5,sizeof(out));memcpy(saved,out,sizeof(out));
+    CHECK(wl_avdtp_close(16,5,out,4)==0);
+    CHECK(wl_avdtp_close(0,0,out,4)==0);
+    CHECK(wl_avdtp_close(0,63,out,4)==0);
+    CHECK(wl_avdtp_close(0,5,out,2)==0);
+    CHECK(wl_avdtp_close(0,5,NULL,4)==0);
+    CHECK(!memcmp(out,saved,sizeof(out)));
+    for(unsigned mode=0;mode<3;++mode) {
+        CHECK(streaming(&s)==0);
+        if(mode) {
+            CHECK(wl_avdtp_session_request_suspend(&s)==0);
+            CHECK(emit(&s,&c,SUSPEND,3)==0);
+            CHECK(response(&s,&c,2,NULL,0)==0);
+            /* START before emission is the local ready-to-start OPEN state. */
+            if(mode==2)CHECK(wl_avdtp_session_request_resume(&s)==0);
+        }
+        before=s;
+        CHECK(wl_avdtp_session_media_closed(&s,100)==WL_AVDTP_SESSION_INVALID_STATE);
+        CHECK(!memcmp(&s,&before,sizeof(s)));
+        CHECK(wl_avdtp_session_request_close(&s)==0);
+        CHECK(emit(&s,&c,CLOSE,3)==0 && c.packet[2]==20);
+        before=s;
+        CHECK(wl_avdtp_session_request_close(&s)==WL_AVDTP_SESSION_BUSY);
+        CHECK(wl_avdtp_session_request_abort(&s)==WL_AVDTP_SESSION_BUSY);
+        CHECK(wl_avdtp_session_media_closed(&s,100)==WL_AVDTP_SESSION_INVALID_STATE);
+        CHECK(!memcmp(&s,&before,sizeof(s)));
+        {
+            command wrong=c;
+            wrong.token.transaction^=1;
+            CHECK(response(&s,&wrong,2,NULL,0)==WL_AVDTP_SESSION_UNMATCHED_RESPONSE);
+            wrong=c;wrong.token.signal=ABORT;
+            CHECK(response(&s,&wrong,2,NULL,0)==WL_AVDTP_SESSION_UNMATCHED_RESPONSE);
+            wrong=c;++wrong.token.generation;
+            CHECK(response(&s,&wrong,2,NULL,0)==WL_AVDTP_SESSION_WRONG_GENERATION);
+            CHECK(!memcmp(&s,&before,sizeof(s)));
+        }
+        CHECK(response(&s,&c,2,NULL,0)==0);
+        CHECK(s.state==WL_AVDTP_SESSION_WAIT_MEDIA_CLOSE && !s.pending && s.configured && s.transport_valid);
+        before=s;
+        CHECK(wl_avdtp_session_next_command(&s,out,sizeof(out),&c.token)==0);
+        CHECK(response(&s,&c,2,NULL,0)==WL_AVDTP_SESSION_UNMATCHED_RESPONSE);
+        CHECK(wl_avdtp_session_media_closed(&s,99)==WL_AVDTP_SESSION_WRONG_GENERATION);
+        CHECK(wl_avdtp_session_init(&s,101,7,48000)==WL_AVDTP_SESSION_INVALID_STATE);
+        CHECK(wl_avdtp_session_request_close(&s)==WL_AVDTP_SESSION_INVALID_STATE);
+        CHECK(!memcmp(&s,&before,sizeof(s)));
+        CHECK(wl_avdtp_session_media_closed(&s,100)==0);
+        CHECK(s.state==WL_AVDTP_SESSION_CLOSED && !s.configured && !s.transport_valid && !s.pending);
+        before=s;
+        CHECK(wl_avdtp_session_media_closed(&s,100)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+        CHECK(response(&s,&c,2,NULL,0)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+        CHECK(!memcmp(&s,&before,sizeof(s)));
+        CHECK(wl_avdtp_session_init(&s,101,7,48000)==0);
+    }
+    /* Neither CONFIGURED nor OPEN-accepted-but-media-not-ready is established. */
+    CHECK(configure_ready(&s,48000)==0);before=s;
+    CHECK(wl_avdtp_session_request_close(&s)==WL_AVDTP_SESSION_INVALID_STATE);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    CHECK(emit(&s,&c,SET_CONFIG,18)==0);CHECK(response(&s,&c,2,NULL,0)==0);before=s;
+    CHECK(wl_avdtp_session_request_close(&s)==WL_AVDTP_SESSION_INVALID_STATE);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    CHECK(emit(&s,&c,OPEN,3)==0);CHECK(response(&s,&c,2,NULL,0)==0);before=s;
+    CHECK(wl_avdtp_session_request_close(&s)==WL_AVDTP_SESSION_INVALID_STATE);
+    CHECK(!memcmp(&s,&before,sizeof(s)));
+    for(unsigned variant=0;variant<7;++variant) {
+        uint8_t payload[2]={0x31,0};unsigned type=3;size_t size=1;
+        CHECK(streaming(&s)==0);CHECK(wl_avdtp_session_request_close(&s)==0);
+        CHECK(emit(&s,&c,CLOSE,3)==0);
+        if(variant==1)size=0;
+        if(variant==2)size=2;
+        if(variant==3)payload[0]=0;
+        if(variant==4)type=2; /* Accept cannot have trailing data. */
+        if(variant==5){type=1;size=0;}
+        if(variant==6)type=1; /* GeneralReject cannot have trailing data. */
+        CHECK(response(&s,&c,type,payload,size)==
+            ((variant==0||variant==5)?WL_AVDTP_SESSION_REJECTED:WL_AVDTP_SESSION_MALFORMED));
+        CHECK(s.state==WL_AVDTP_SESSION_FAILED && !s.pending && !s.transport_valid);
+        if(variant==0)CHECK(s.last_reject_error==0x31);
+    }
+    for(unsigned variant=0;variant<3;++variant) {
+        int result;
+        CHECK(streaming(&s)==0);CHECK(wl_avdtp_session_request_close(&s)==0);
+        CHECK(emit(&s,&c,CLOSE,3)==0);
+        if(variant==0)result=wl_avdtp_session_timeout(&s,&c.token);
+        else if(variant==1)result=wl_avdtp_session_send_failed(&s,&c.token);
+        else result=wl_avdtp_session_transport_failed(&s,100);
+        CHECK(result==(variant==0?WL_AVDTP_SESSION_TIMEOUT:variant==1?WL_AVDTP_SESSION_SEND_FAILED:WL_AVDTP_SESSION_TRANSPORT_FAILED));
+        CHECK(s.state==WL_AVDTP_SESSION_FAILED && !s.pending && !s.transport_valid);
+        CHECK(response(&s,&c,2,NULL,0)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+        CHECK(wl_avdtp_session_media_closed(&s,100)==WL_AVDTP_SESSION_TRANSPORT_INVALID);
+    }
+    return 0;
+}
+
 int main(void) {
     if(lifecycle_tests() || exact_rate_tests() || matching_tests() ||
        unmatched_malformed_priority_tests() ||
        discover_failure_tests() || capability_failure_tests() ||
        reject_and_packet_tests() || fixed_signal_reject_tests() || packet_boundary_tests() ||
-       sequence_exhaustion_tests() || token_and_epoch_tests() || state_and_wrap_tests())return 1;
+       sequence_exhaustion_tests() || token_and_epoch_tests() || state_and_wrap_tests() || close_tests())return 1;
     printf("{\"kind\":\"offline_avdtp_session_tests\",\"checks\":%u,"
            "\"real_bluetooth_tested\":false,\"headset_audio_tested\":false}\n",checks);
     return 0;

@@ -6,7 +6,7 @@
 static unsigned checks;
 #define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"FAIL playback:%d: %s\n",__LINE__,#x);return 1;}}while(0)
 enum { EVENT_OPEN_SIGNAL=100,EVENT_OPEN_MEDIA,EVENT_WAIT=200,EVENT_MEDIA=201,
-       EVENT_SOURCE=202,EVENT_CLOSE_MEDIA=300,EVENT_CLOSE_SIGNAL=301 };
+       EVENT_SOURCE=202,EVENT_FINISH=203,EVENT_CLOSE_ACCEPT=204,EVENT_CLOSE_MEDIA=300,EVENT_CLOSE_SIGNAL=301 };
 typedef struct {
     unsigned calls,fail_at,stop_at,stop_on_failure,stop;
     unsigned out[2],in[2],opened[2],closed[2],peer_open,peer_started;
@@ -15,6 +15,7 @@ typedef struct {
     unsigned first_sink_sbc,cap_requests,unmatched_remaining,unmatched_forever,receive_calls;
     unsigned request_calls,request_at,request_kbps,signal_sends;
     unsigned media_packets,media_bytes,media_frames,wait_calls,ready_wait,violation;
+    unsigned finish_calls,final_packet_samples,finished,fail_finish;
     uint64_t last_wait,media_hash;
     uint8_t last_command[18];size_t last_command_size;
     unsigned events[1024],event_count;
@@ -49,7 +50,7 @@ static int f_send(void *context,unsigned channel,const uint8_t *packet,size_t si
         if(size<2||size>sizeof(f->last_command)){f->violation=1;return -1;}
         memcpy(f->last_command,packet,size);f->last_command_size=size;
         if((packet[1]&0x3fu)==WL_AVDTP_START&&!f->opened[WL_MEDIA]){f->violation=1;return -1;}
-        if((packet[1]&0x3fu)==WL_AVDTP_SUSPEND&&(!f->ready_wait||f->last_wait!=(uint64_t)f->media_frames*(f->source_rate>48000?256u:128u))){f->violation=1;return -1;}
+        if((packet[1]&0x3fu)==WL_AVDTP_CLOSE&&!f->finished){f->violation=1;return -1;}
         return 0;
     }
     if(!f->peer_started||!f->ready_wait||size<=13||packet[0]!=0x80||packet[1]!=96||
@@ -57,6 +58,7 @@ static int f_send(void *context,unsigned channel,const uint8_t *packet,size_t si
        be32(packet+4)!=(uint32_t)((uint64_t)f->media_frames*(f->source_rate>48000?256u:128u))||
        be32(packet+8)!=0x11223344u||!(packet[12]&15u)||(packet[12]&0xf0u)||packet[13]!=0xaa){f->violation=1;return -1;}
     for(size_t i=0;i<size;++i){f->media_hash^=packet[i];f->media_hash*=UINT64_C(1099511628211);}
+    f->final_packet_samples=(packet[12]&15u)*(f->source_rate>48000?256u:128u);
     f->media_frames+=packet[12]&15u;++f->media_packets;f->media_bytes+=(unsigned)size;
     f->ready_wait=0;return 0;
 }
@@ -89,6 +91,7 @@ static int f_receive(void *context,unsigned channel,uint8_t *packet,size_t capac
     }else if(signal==WL_AVDTP_OPEN)f->peer_open=1;
     else if(signal==WL_AVDTP_START)f->peer_started=1;
     else if(signal==WL_AVDTP_SUSPEND)f->peer_started=0;
+    else if(signal==WL_AVDTP_CLOSE)event(f,EVENT_CLOSE_ACCEPT);
     if(n>capacity){f->violation=1;return -1;}
     memcpy(packet,out,n);*size=n;return 0;
 }
@@ -97,6 +100,14 @@ static int f_wait(void *context,uint64_t offset,unsigned rate) {
     if(call(f))return -1;
     if(rate!=f->source_rate||offset!=(uint64_t)f->media_frames*(rate>48000?256u:128u)){f->violation=1;return -1;}
     f->last_wait=offset;++f->wait_calls;f->ready_wait=1;return 0;
+}
+static int f_finish(void *context,uint64_t end,unsigned final_samples,unsigned rate) {
+    fake *f=context;event(f,EVENT_FINISH);++f->finish_calls;
+    if(call(f)||f->fail_finish)return -1;
+    if(f->finished||rate!=f->source_rate||
+       end!=(uint64_t)f->media_frames*(rate>48000?256u:128u)||
+       final_samples!=f->final_packet_samples){f->violation=1;return -1;}
+    f->last_wait=end;f->finished=1;return 0;
 }
 static int f_stopped(void *context){return ((fake*)context)->stop!=0;}
 static unsigned f_requested(void *context){fake *f=context;++f->request_calls;return f->request_calls==f->request_at?f->request_kbps:0;}
@@ -121,7 +132,7 @@ static void init(fake *f,unsigned frames) {
     f->media_hash=UINT64_C(14695981039346656037);
 }
 static int run(fake *f,unsigned rate,LDACBT_SMPL_FMT_T format,unsigned bitrate,wl_playback_report *r) {
-    wl_playback_io io={f,f_open,f_send,f_receive,f_wait,f_stopped,f_requested,f_close};
+    wl_playback_io io={f,f_open,f_send,f_receive,f_wait,f_finish,f_stopped,f_requested,f_close};
     wl_pcm_source source={f,f_read,rate,format};
     wl_playback_options options={bitrate,1,0x11223344u,1};
     f->source_rate=rate;f->format_bytes=format==LDACBT_SMPL_FMT_S16?2:format==LDACBT_SMPL_FMT_S24?3:4;
@@ -139,10 +150,10 @@ static int success_tests(void) {
         unsigned kbps=wl_bitrate_kbps(rates[rate],quality);
         init(&f,300);f.first_sink_sbc=1;
         CHECK(run(&f,rates[rate],formats[format],quality?kbps:0,&r)==WL_PLAY_OK);
-        CHECK(!f.violation&&closed_in_order(&f));CHECK(r.result==WL_PLAY_OK&&r.stage==WL_AVDTP_SESSION_ABORTED);
+        CHECK(!f.violation&&closed_in_order(&f));CHECK(r.result==WL_PLAY_OK&&r.stage==WL_AVDTP_SESSION_CLOSED);
         CHECK(r.source_frames==300&&r.encoded_frames==f.media_frames&&r.media_packets==f.media_packets);
         CHECK(r.media_bytes==f.media_bytes&&f.cap_requests==2&&r.requested_kbps==kbps&&r.actual_kbps==kbps);
-        CHECK(f.wait_calls==f.media_packets+1&&f.last_wait==r.encoded_frames*(rates[rate]>48000?256u:128u));
+        CHECK(f.wait_calls==f.media_packets&&f.finish_calls==1&&f.finished&&f.last_wait==r.encoded_frames*(rates[rate]>48000?256u:128u));
         CHECK(r.negotiated_mtu==1008&&r.bitrate_changes==0&&f.media_packets>0);
     }
     init(&f,0);CHECK(run(&f,48000,LDACBT_SMPL_FMT_F32,0,&r)==WL_PLAY_OK);
@@ -152,6 +163,36 @@ static int success_tests(void) {
     CHECK(!f.violation&&r.negotiated_mtu==679&&closed_in_order(&f));
     init(&f,256);f.unmatched_remaining=2;
     CHECK(run(&f,48000,LDACBT_SMPL_FMT_F32,0,&r)==WL_PLAY_OK&&closed_in_order(&f));
+    return 0;
+}
+static int graceful_eof_tests(void) {
+    fake f;wl_playback_report r;
+    const unsigned lengths[]={0,1,127,128,129,4096};
+    for(unsigned i=0;i<sizeof(lengths)/sizeof(lengths[0]);++i){
+        init(&f,lengths[i]);CHECK(run(&f,48000,LDACBT_SMPL_FMT_S16,0,&r)==WL_PLAY_OK);
+        CHECK(f.finish_calls==1&&closed_in_order(&f)&&!f.violation);
+        CHECK(f.event_count>=5);
+        CHECK(f.events[f.event_count-5]==EVENT_FINISH);
+        CHECK(f.events[f.event_count-4]==WL_AVDTP_CLOSE);
+        CHECK(f.events[f.event_count-3]==EVENT_CLOSE_ACCEPT);
+        for(unsigned j=0;j<f.event_count;++j)
+            CHECK(f.events[j]!=WL_AVDTP_ABORT&&f.events[j]!=WL_AVDTP_SUSPEND);
+    }
+    init(&f,128);f.fail_finish=1;
+    CHECK(run(&f,48000,LDACBT_SMPL_FMT_S16,0,&r)==WL_PLAY_TRANSPORT);
+    CHECK(f.finish_calls==1&&!f.finished&&closed_in_order(&f));
+    for(unsigned j=0;j<f.event_count;++j)CHECK(f.events[j]!=WL_AVDTP_CLOSE);
+    init(&f,128);f.malformed_signal=WL_AVDTP_CLOSE;
+    CHECK(run(&f,48000,LDACBT_SMPL_FMT_S16,0,&r)==WL_PLAY_PROTOCOL);
+    CHECK(r.protocol_error==WL_AVDTP_SESSION_MALFORMED&&closed_in_order(&f));
+    init(&f,128);
+    {
+        wl_playback_io io={&f,f_open,f_send,f_receive,f_wait,NULL,f_stopped,f_requested,f_close};
+        wl_pcm_source source={&f,f_read,48000,LDACBT_SMPL_FMT_S16};
+        wl_playback_options options={0,1,0x11223344u,1};
+        CHECK(wl_playback_run(&io,&source,&options,&r)==WL_PLAY_ARGUMENT);
+        CHECK(f.calls==0&&f.closed[0]==0&&f.closed[1]==0);
+    }
     return 0;
 }
 static int padding_and_bitrate_tests(void) {
@@ -190,7 +231,7 @@ static int failure_tests(void) {
     init(&f,300);f.no_exact_rate=1;
     CHECK(run(&f,48000,LDACBT_SMPL_FMT_F32,0,&r)==WL_PLAY_PROTOCOL&&r.protocol_error==WL_AVDTP_SESSION_CONVERSION_REQUIRED);
     CHECK(f.opened[1]==0&&f.media_packets==0&&f.read_calls==0&&closed_in_order(&f));
-    const unsigned rejects[]={WL_AVDTP_DISCOVER,WL_AVDTP_GET_CAPABILITIES,WL_AVDTP_SET_CONFIGURATION,WL_AVDTP_OPEN,WL_AVDTP_START,WL_AVDTP_SUSPEND,WL_AVDTP_ABORT};
+    const unsigned rejects[]={WL_AVDTP_DISCOVER,WL_AVDTP_GET_CAPABILITIES,WL_AVDTP_SET_CONFIGURATION,WL_AVDTP_OPEN,WL_AVDTP_START,WL_AVDTP_CLOSE};
     for(unsigned i=0;i<sizeof(rejects)/sizeof(rejects[0]);++i){
         init(&f,300);f.reject_signal=rejects[i];
         CHECK(run(&f,48000,LDACBT_SMPL_FMT_F32,0,&r)==WL_PLAY_PROTOCOL&&closed_in_order(&f));
@@ -216,7 +257,7 @@ static int failure_tests(void) {
     return 0;
 }
 int main(void) {
-    if(success_tests()||padding_and_bitrate_tests()||failure_tests())return 1;
+    if(success_tests()||graceful_eof_tests()||padding_and_bitrate_tests()||failure_tests())return 1;
     printf("PASS: %u portable playback fake-peer checks; no Bluetooth, driver load or audio-endpoint acceptance.\n",checks);
     return 0;
 }

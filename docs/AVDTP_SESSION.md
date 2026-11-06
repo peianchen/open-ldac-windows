@@ -83,7 +83,7 @@ fragments and peer commands keep the explicitly unsupported/fail-closed behavior
 The next integration must provide asynchronous signaling I/O and separate media
 channel lifetime, cancellation/deadline ownership, actual peer packet traces and
 an explicit teardown path. Peer-initiated commands, fragmented signaling,
-graceful CLOSE/reconfiguration/content protection and interoperability still
+peer-initiated closure/reconfiguration/content protection and interoperability still
 require development before claiming a complete AVDTP implementation. Windows
 PCM endpoint/service, real PnP/sleep behavior, signing/restore and quality/power
 measurements remain separate gates before daily-use installation.
@@ -92,3 +92,20 @@ Protocol references: Bluetooth SIG [AVDTP 1.3](https://www.bluetooth.com/specifi
 sections 6.2 (transaction model), 8.4 (headers) and 8.6–8.16 (commands/response
 formats). The associated erratum and complete profile requirements remain part
 of any future conformity work; this subset makes no conformity claim.
+
+## Normal CLOSE continuation (2026-11-06)
+
+`request_close` emits signal 0x08 from STREAMING, SUSPENDED, or the established
+OPEN state represented by START before a command is pending. Existing enum
+values are preserved; CLOSE, WAIT_MEDIA_CLOSE and CLOSED are appended. A
+matching empty acceptance reaches WAIT_MEDIA_CLOSE. Only the owner's
+`media_closed(generation)` report advances to CLOSED and clears configuration.
+This report means local ownership retirement; the current backend's handle close
+does not provide proof of asynchronous BRB or remote L2CAP disconnect completion.
+Failures invalidate the epoch; rejection never silently falls back to ABORT.
+
+The Bluetooth SIG [AVDTP test suite p22](https://files.bluetooth.com/wp-content/uploads/dlm_uploads/2025/02/AVDTP.TS_.p22.pdf),
+sections 4.3.1.14 and 4.3.1.43, specifies acceptance before media release and the
+rejection format. These implementation tests do not constitute SIG qualification.
+Executed current tests and remaining gates are in the
+[dated report](validation/GRACEFUL_CLOSE_2026-11-06.md).

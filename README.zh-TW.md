@@ -16,6 +16,8 @@
 
 - [原生通道與音訊服務整合報告](docs/validation/PLAYBACK_USERMODE_2026-11-04.md)：真 Windows I/O、VM SCM 控制／正常與錯誤退場，保留計時測試失敗與限制。
 
+- [播放尾段與正常 CLOSE 驗證](docs/validation/GRACEFUL_CLOSE_2026-11-06.md)：等待最後成功傳送的封包時長、接收 CLOSE 回覆後才釋放本機媒體通道。
+
 文件區分官方規格、廠商說明、實作、實測、推論與待驗證設計；沒有把模擬或離線結果當成音質／耗電實測。
 
 ## 目前功能與策略
